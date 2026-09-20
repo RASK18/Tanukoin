@@ -66,43 +66,44 @@ test("cuenta, importación CSV, edición, exportación y reimportación con dupl
   ).toHaveCount(3);
   expect(outside).toEqual([]);
 });
-test("PWA: nuevo arranque offline y lector Excel sin visitar antes el importador", async ({
-  page,
-  context,
-}) => {
-  await createAccount(page);
-  await page.goto("/Tanukoin/");
-  await page.evaluate(async () => {
-    await navigator.serviceWorker.ready;
-  });
-  await expect
-    .poll(() => page.evaluate(() => !!navigator.serviceWorker.controller), {
-      timeout: 60000,
-    })
-    .toBe(true);
-  await context.setOffline(true);
-  await page.reload();
-  await expect(
-    page.getByRole("heading", { name: "Tu dinero, con perspectiva" }),
-  ).toBeVisible();
-  const book = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(
-    book,
-    XLSX.utils.aoa_to_sheet([
-      ["Fecha", "Concepto", "Importe"],
-      ["18/09/2026", "Compra Excel", "-22,10"],
-    ]),
-    "Cuenta",
-  );
-  await importFile(
+for (const bookType of ["xlsx", "xls"] as const)
+  test(`PWA: nuevo arranque offline y lector ${bookType} sin visitar antes el importador`, async ({
     page,
-    "extracto.xlsx",
-    XLSX.write(book, { type: "buffer", bookType: "xlsx" }),
-  );
-  await page.getByRole("button", { name: "Revisar movimientos" }).click();
-  await page.getByRole("button", { name: "Importar 1 movimientos" }).click();
-  await expect(page.getByText("Compra Excel", { exact: true })).toBeVisible();
-});
+    context,
+  }) => {
+    await createAccount(page);
+    await page.goto("/Tanukoin/");
+    await page.evaluate(async () => {
+      await navigator.serviceWorker.ready;
+    });
+    await expect
+      .poll(() => page.evaluate(() => !!navigator.serviceWorker.controller), {
+        timeout: 60000,
+      })
+      .toBe(true);
+    await context.setOffline(true);
+    await page.reload();
+    await expect(
+      page.getByRole("heading", { name: "Tu dinero, con perspectiva" }),
+    ).toBeVisible();
+    const book = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(
+      book,
+      XLSX.utils.aoa_to_sheet([
+        ["Fecha", "Concepto", "Importe"],
+        ["18/09/2026", "Compra Excel", "-22,10"],
+      ]),
+      "Cuenta",
+    );
+    await importFile(
+      page,
+      `extracto.${bookType}`,
+      XLSX.write(book, { type: "buffer", bookType }),
+    );
+    await page.getByRole("button", { name: "Revisar movimientos" }).click();
+    await page.getByRole("button", { name: "Importar 1 movimientos" }).click();
+    await expect(page.getByText("Compra Excel", { exact: true })).toBeVisible();
+  });
 function textPdf() {
   const content =
     "BT /F1 12 Tf 40 760 Td (Fecha) Tj 130 0 Td (Concepto) Tj 200 0 Td (Importe) Tj -330 -24 Td (19/09/2026) Tj 130 0 Td (Compra PDF) Tj 200 0 Td (-12,30) Tj ET";
@@ -143,23 +144,21 @@ test("historial de ubicaciones y copias requieren confirmación", async ({
 }) => {
   await createAccount(page);
   await page.goto("#/mapa");
-  await page
-    .locator("input[type=file]")
-    .setInputFiles({
-      name: "Records.json",
-      mimeType: "application/json",
-      buffer: Buffer.from(
-        JSON.stringify({
-          locations: [
-            {
-              latitudeE7: 404168000,
-              longitudeE7: -37038000,
-              timestamp: "2026-09-15T12:00:00Z",
-            },
-          ],
-        }),
-      ),
-    });
+  await page.locator("input[type=file]").setInputFiles({
+    name: "Records.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(
+      JSON.stringify({
+        locations: [
+          {
+            latitudeE7: 404168000,
+            longitudeE7: -37038000,
+            timestamp: "2026-09-15T12:00:00Z",
+          },
+        ],
+      }),
+    ),
+  });
   await expect(page.getByText(/1 ubicaciones nuevas/)).toBeVisible();
   await page.getByRole("button", { name: "Confirmar importación" }).click();
   await expect(page.getByText("1 puntos y estancias guardados")).toBeVisible();
@@ -175,6 +174,14 @@ test("historial de ubicaciones y copias requieren confirmación", async ({
   await expect(
     page.getByRole("button", { name: "Sustituir datos y restaurar" }),
   ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Sustituir datos y restaurar" })
+    .click();
+  await expect(page.getByRole("status")).toContainText("Copia restaurada");
+  await page.goto("#/cuentas");
+  await expect(page.getByRole("heading", { name: "Principal" })).toBeVisible();
+  await page.goto("#/mapa");
+  await expect(page.getByText("1 puntos y estancias guardados")).toBeVisible();
 });
 test("móvil: navegación, Tanu y ausencia de desbordamiento", async ({
   page,
