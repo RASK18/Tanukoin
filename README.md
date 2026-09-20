@@ -39,6 +39,8 @@ pnpm preview
 
 Playwright prueba `dist/`. Para comprobar el modelo real (descarga aproximada de 118 MB), usa `TEST_LOCAL_MODEL=1 pnpm test:e2e` en Bash o `$env:TEST_LOCAL_MODEL='1'; pnpm test:e2e` en PowerShell. Esta descarga no se realiza en cada despliegue.
 
+`TEST_LOCAL_CHAT=1` habilita la prueba equivalente del chat (aproximadamente 1 GB); se omite si el navegador no tiene WebGPU compatible.
+
 ## Publicación y versiones
 
 GitHub Actions comprueba tipos, pruebas unitarias, compilación y pruebas de navegador antes de publicar. Configura **Settings → Pages → Source → GitHub Actions**. La ruta es `/Tanukoin/`; `disboard.es` se hereda del sitio de usuario de GitHub Pages.
