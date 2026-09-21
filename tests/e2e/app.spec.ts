@@ -22,6 +22,147 @@ const csv = Buffer.from(
   "Fecha;Concepto;Importe;Saldo\n15/09/2026;Compra supermercado;-54,32;100,00\n16/09/2026;Nomina;2540,00;2640,00\n17/09/2026;Cafe;-2,50;2637,50\n",
 );
 
+test("Tus movimientos muestra el saldo importado, incluido cero, sin recalcular al filtrar", async ({
+  page,
+}) => {
+  await createAccount(page);
+  await importFile(
+    page,
+    "saldos.csv",
+    Buffer.from(
+      "Fecha;Concepto;Importe;Saldo\n15/09/2026;Saldo positivo;-10,00;123,45\n16/09/2026;Saldo cero;-123,45;0,00\n17/09/2026;Saldo negativo;-8,00;-8,00\n18/09/2026;Sin saldo;-2,00;\n",
+    ),
+  );
+  await page.getByRole("button", { name: "Revisar movimientos" }).click();
+  await page.getByRole("button", { name: "Importar 4 movimientos" }).click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await expect(
+    page.getByRole("columnheader", { name: "Saldo", exact: true }),
+  ).toBeVisible();
+  for (const [description, balance] of [
+    ["Saldo positivo", "123,45 €"],
+    ["Saldo cero", "0,00 €"],
+    ["Saldo negativo", "-8,00 €"],
+    ["Sin saldo", "—"],
+  ]) {
+    const row = page
+      .getByRole("row")
+      .filter({ has: page.getByText(description, { exact: true }) });
+    await expect(row.getByRole("cell").nth(6)).toHaveText(balance);
+  }
+  await page.getByLabel("Ordenar movimientos").selectOption("date-asc");
+  await page.getByLabel("Filtrar movimientos").fill("Saldo positivo");
+  await expect(
+    page.getByRole("cell", { name: "123,45 €", exact: true }),
+  ).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByRole("cell", { name: "123,45 €", exact: true }),
+  ).toBeVisible();
+  await page.screenshot({ path: "artifacts/movements-balance.png" });
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+});
+
+for (const fail of [false, true])
+  test(`importación grande: progreso y ${fail ? "rollback con reintento" : "guardado completo"}`, async ({
+    page,
+  }) => {
+    await createAccount(page);
+    await importFile(
+      page,
+      "muchos.csv",
+      Buffer.from(
+        "Fecha;Concepto;Importe;Saldo\n" +
+          Array.from(
+            { length: 1200 },
+            (_, i) =>
+              `15/09/2026;Movimiento ficticio ${i};-1,00;${2000 - i},00\n`,
+          ).join(""),
+      ),
+    );
+    await page.getByRole("button", { name: "Revisar movimientos" }).click();
+    await page.evaluate((fail) => {
+      const seen: string[] = [];
+      (window as any).importStatuses = seen;
+      new MutationObserver(() => {
+        const status = document.querySelector(".import-progress")?.textContent;
+        if (status) seen.push(status);
+      }).observe(document.body, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+      });
+      if (fail) {
+        const original = IDBObjectStore.prototype.add;
+        let added = 0;
+        IDBObjectStore.prototype.add = function (...args) {
+          if (this.name === "movements" && ++added === 251) {
+            IDBObjectStore.prototype.add = original;
+            throw new DOMException(
+              "Fallo de prueba al guardar",
+              "QuotaExceededError",
+            );
+          }
+          return original.apply(this, args);
+        };
+      }
+    }, fail);
+    await page
+      .getByRole("button", { name: "Importar 1200 movimientos" })
+      .click();
+    const countSaved = () =>
+      page.evaluate(
+        () =>
+          new Promise<number>((resolve, reject) => {
+            const request = indexedDB.open("tanukoin");
+            request.onsuccess = () => {
+              const database = request.result;
+              const count = database
+                .transaction("movements")
+                .objectStore("movements")
+                .count();
+              count.onsuccess = () => {
+                database.close();
+                resolve(count.result);
+              };
+              count.onerror = () => reject(count.error);
+            };
+            request.onerror = () => reject(request.error);
+          }),
+      );
+    if (fail) {
+      await expect(
+        page.getByRole("button", { name: "Importar 1200 movimientos" }),
+      ).toBeVisible();
+      expect(await countSaved()).toBe(0);
+      await expect(
+        page.getByLabel("Incluir fila 2", { exact: true }),
+      ).toBeChecked();
+      await page
+        .getByRole("button", { name: "Importar 1200 movimientos" })
+        .click();
+    }
+    await expect(page.getByRole("dialog")).not.toBeVisible();
+    expect(await countSaved()).toBe(1200);
+    const statuses = await page.evaluate(
+      () => (window as any).importStatuses as string[],
+    );
+    expect(statuses.some((s) => s.includes("Importando tus movimientos"))).toBe(
+      true,
+    );
+    expect(statuses.some((s) => /Quedan [1-9]\d* en esta fase/.test(s))).toBe(
+      true,
+    );
+    expect(statuses.some((s) => s.includes("Guardando movimientos"))).toBe(
+      true,
+    );
+  });
+
 test("cuenta, importación CSV, edición, exportación y reimportación con duplicados", async ({
   page,
 }) => {

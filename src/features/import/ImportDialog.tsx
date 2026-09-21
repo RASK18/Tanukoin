@@ -51,6 +51,17 @@ export function ImportDialog({
     );
   });
   const [dragging, setDragging] = useState(false);
+  const [saving, setSaving] = useState<{
+    phase: string;
+    done?: number;
+    total?: number;
+  }>();
+  const savingRef = useRef(false);
+  const [saveFailed, setSaveFailed] = useState(false);
+  const savingHeading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (saving) savingHeading.current?.focus();
+  }, [!!saving]);
   const [detection, setDetection] = useState("");
   const generation = useRef(0);
   const [errors, setErrors] = useState<string[]>([]),
@@ -178,20 +189,46 @@ export function ImportDialog({
     setPreviewPage(0);
   }
   async function save() {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaveFailed(false);
     setLoading(true);
+    setSaving({ phase: "Preparando movimientos" });
     const importId = crypto.randomUUID();
     const success = await run(
       (async () => {
-        let prepared = candidates
-          .filter((c) => c.selected && c.duplicate !== "exact")
-          .map((c) => applyRules({ ...c.movement, importId }, data.rules));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        const selected = candidates.filter(
+          (c) => c.selected && c.duplicate !== "exact",
+        );
+        let prepared: Movement[] = [];
+        for (let i = 0; i < selected.length; i += 250) {
+          prepared.push(
+            ...selected
+              .slice(i, i + 250)
+              .map((c) => applyRules({ ...c.movement, importId }, data.rules)),
+          );
+          setSaving({
+            phase: "Aplicando reglas",
+            done: prepared.length,
+            total: selected.length,
+          });
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
         if ((await db.models.get("embeddings"))?.ready) {
           try {
+            setSaving({ phase: "Preparando la IA local" });
             const { categorize } = await import("../ai/client");
             prepared = await categorize(
               prepared,
               data.categories,
               data.movements,
+              (done, total) =>
+                setSaving({
+                  phase: "Analizando movimientos con IA local",
+                  done,
+                  total,
+                }),
             );
           } catch {
             notify(
@@ -199,25 +236,39 @@ export function ImportDialog({
             );
           }
         }
+        setSaving({ phase: "Comprobando identificadores bancarios" });
         await db.transaction("rw", db.movements, async () => {
           const savedExternal = new Set(
             (await db.movements.toArray())
               .filter((m) => m.externalId)
               .map((m) => JSON.stringify([m.accountId, m.externalId])),
           );
-          for (const m of prepared) {
-            if (
-              m.externalId &&
-              savedExternal.has(JSON.stringify([m.accountId, m.externalId]))
-            )
-              continue;
-            await db.movements.add(m);
+          const pending = prepared.filter(
+            (m) =>
+              !m.externalId ||
+              !savedExternal.has(JSON.stringify([m.accountId, m.externalId])),
+          );
+          setSaving({
+            phase: "Guardando movimientos",
+            done: 0,
+            total: pending.length,
+          });
+          for (let i = 0; i < pending.length; i += 250) {
+            await db.movements.bulkAdd(pending.slice(i, i + 250));
+            setSaving({
+              phase: "Guardando movimientos",
+              done: Math.min(i + 250, pending.length),
+              total: pending.length,
+            });
           }
         });
       })(),
       "Movimientos importados. Todo se ha guardado en este navegador.",
     );
     setLoading(false);
+    savingRef.current = false;
+    setSaving(undefined);
+    setSaveFailed(!success);
     if (success) onClose();
   }
   function editCandidate(
@@ -267,13 +318,17 @@ export function ImportDialog({
       wide
     >
       <div className="steps">
-        <span className={!review ? "active" : ""}>
+        <span className={!review && !saving ? "active" : ""}>
           1. Archivo y vista previa
         </span>
         <ArrowRight size={15} />
-        <span className={review ? "active" : ""}>2. Revisar e importar</span>
+        <span className={review && !saving ? "active" : ""}>
+          2. Revisar e importar
+        </span>
+        <ArrowRight size={15} />
+        <span className={saving ? "active" : ""}>3. Importando</span>
       </div>
-      {!review && (
+      {!review && !saving && (
         <>
           <label
             className={`dropzone${dragging ? " dragging" : ""}${file ? " has-file" : ""}`}
@@ -580,7 +635,35 @@ export function ImportDialog({
           )}
         </>
       )}
-      {loading && (
+      {saving && (
+        <section
+          className="import-progress"
+          aria-label="Progreso de importación"
+        >
+          <h3 ref={savingHeading} tabIndex={-1}>
+            Importando tus movimientos
+          </h3>
+          <div role="status" aria-live="polite" aria-atomic="true">
+            <p>{saving.phase}…</p>
+            {saving.total !== undefined && saving.done !== undefined && (
+              <p>
+                {saving.done} de {saving.total} movimientos · Quedan{" "}
+                {saving.total - saving.done} en esta fase
+              </p>
+            )}
+          </div>
+          <progress
+            aria-label={saving.phase}
+            max={saving.total || 1}
+            value={saving.done}
+          />
+          <p className="muted">
+            Mantén esta ventana abierta hasta que termine. Todo se procesa en tu
+            dispositivo.
+          </p>
+        </section>
+      )}
+      {loading && !saving && (
         <div className="notice">
           <FileSpreadsheet size={18} />
           <span>
@@ -601,7 +684,7 @@ export function ImportDialog({
           )}
         </div>
       )}
-      {errors.length > 0 && (
+      {errors.length > 0 && !saving && (
         <details className="notice warning" open>
           <summary>
             <AlertTriangle size={16} /> {errors.length} filas o incidencias que
@@ -617,8 +700,14 @@ export function ImportDialog({
           )}
         </details>
       )}
-      {review && (
+      {review && !saving && (
         <>
+          {saveFailed && (
+            <p className="notice warning" role="alert">
+              No se ha guardado ningún movimiento de esta importación. Tu
+              selección se conserva; puedes volver a intentarlo.
+            </p>
+          )}
           <div className="import-summary">
             <span>
               <strong>{candidates.filter((c) => c.selected).length}</strong>{" "}

@@ -363,6 +363,12 @@ export function Movements({ onImport }: { onImport: () => void }) {
                     <th>Categoría</th>
                     <th>Cuenta</th>
                     <th className="align-right">Importe</th>
+                    <th
+                      className="align-right"
+                      title="Saldo de la cuenta tras este movimiento, según el archivo importado"
+                    >
+                      Saldo
+                    </th>
                     <th>Editar</th>
                   </tr>
                 </thead>
@@ -439,6 +445,13 @@ export function Movements({ onImport }: { onImport: () => void }) {
                         className={`amount align-right ${m.amount > 0 ? "positive" : ""}`}
                       >
                         {money(m.amount, m.currency)}
+                      </td>
+                      <td className="align-right nowrap">
+                        {m.balance === undefined ? (
+                          <span aria-label="Saldo no disponible">—</span>
+                        ) : (
+                          money(m.balance, m.currency)
+                        )}
                       </td>
                       <td>
                         <button

@@ -60,6 +60,20 @@ La presencia de una función en código no sustituye las validaciones reales pen
 
 ## Cambios recientes de importación
 
+### Saldo en Tus movimientos
+
+- La tabla muestra «Saldo» después de «Importe»: el valor `Movement.balance` procedente del archivo importado, correspondiente a la cuenta de ese movimiento y formateado en su moneda. No se recalcula al filtrar, ordenar o editar el importe, ni se mezcla entre cuentas.
+- Se muestran los valores cero y negativos; los movimientos sin saldo importado muestran «—» con etiqueta accesible «Saldo no disponible». No se reconstruyen saldos históricos.
+- Validación: compilación con comprobación de tipos y una regresión de navegador que importa saldos positivos, cero, negativos y ausentes, verifica filtros, ordenación y persistencia tras recargar, y comprueba que la página no desborda en móvil. Captura de escritorio revisada con datos ficticios.
+
+### Paso de progreso al confirmar la importación
+
+- Tras confirmar en la revisión, el paso **3. Importando** sustituye la tabla por el estado de la operación. Muestra preparación, reglas, IA local cuando está preparada y guardado; las fases medibles indican movimientos procesados y pendientes de esa fase. No se estima un tiempo restante ni un porcentaje global ficticio.
+- Las reglas se aplican por lotes cediendo tiempo al navegador. La IA informa del avance de los vectores de movimientos cada lote de 16 y cuenta los ya disponibles en caché; la preparación de categorías y ejemplos muestra espera indeterminada.
+- El guardado usa lotes de 250 dentro de una única transacción IndexedDB, manteniendo la comparación de identificadores solo frente a movimientos previamente guardados. Un error revierte toda la importación y devuelve a la revisión conservando la selección y mostrando un aviso; se bloquean cierres y confirmaciones repetidas durante el proceso.
+- El nuevo paso recibe el foco y anuncia su estado de forma accesible. Los indicadores de pasos se ajustan a pantallas pequeñas.
+- Validación: tipos, compilación, 27 pruebas unitarias (incluido progreso de IA con worker simulado y caché) y 12 pruebas de navegador, incluidas regresiones con 1.200 movimientos, progreso, fallo tras un lote, reversión completa y reintento. La IA real no se ha ejecutado para este cambio.
+
 ### PDF y múltiples páginas — referencia 0.1.5
 
 El certificado bancario con cabeceras `FE.ANOTAC / IMPORTE / SALDO / CONCEPTO` coloca fecha e importes al final de conceptos que pueden ocupar varias líneas. Las páginas siguientes no repiten la cabecera.

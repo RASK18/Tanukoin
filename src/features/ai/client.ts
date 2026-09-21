@@ -164,7 +164,10 @@ export async function embed(texts: string[]): Promise<number[][]> {
 }
 export const cosine = (a: number[], b: number[]) =>
   a.reduce((sum, v, i) => sum + v * (b[i] || 0), 0);
-async function vectors(rows: { id: string; text: string }[]) {
+async function vectors(
+  rows: { id: string; text: string }[],
+  onProgress?: (done: number, total: number) => void,
+) {
   const result: Record<string, number[]> = {};
   const missing: typeof rows = [];
   for (const row of rows) {
@@ -173,6 +176,7 @@ async function vectors(rows: { id: string; text: string }[]) {
       result[row.id] = cached.vector;
     else missing.push(row);
   }
+  onProgress?.(rows.length - missing.length, rows.length);
   for (let i = 0; i < missing.length; i += 16) {
     const batch = missing.slice(i, i + 16),
       values = await embed(batch.map((r) => r.text));
@@ -184,6 +188,10 @@ async function vectors(rows: { id: string; text: string }[]) {
         model: MODEL_REVISION,
       });
     }
+    onProgress?.(
+      rows.length - missing.length + Math.min(i + 16, missing.length),
+      rows.length,
+    );
   }
   return result;
 }
@@ -191,6 +199,7 @@ export async function categorize(
   movements: Movement[],
   categories: Category[],
   examples: Movement[],
+  onProgress?: (done: number, total: number) => void,
 ): Promise<Movement[]> {
   if (!(await db.models.get("embeddings"))?.ready || !categories.length)
     return movements;
@@ -217,6 +226,7 @@ export async function categorize(
       id: m.id,
       text: `${m.merchant} ${m.description}`,
     })),
+    onProgress,
   );
   return movements.map((m) => {
     if (!movementVectors[m.id]) return m;

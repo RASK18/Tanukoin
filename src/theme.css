@@ -1348,6 +1348,7 @@ tbody tr:hover {
   flex: 1;
 }
 .steps {
+  flex-wrap: wrap;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1358,6 +1359,15 @@ tbody tr:hover {
 .steps .active {
   color: #587c48;
   font-weight: 600;
+}
+.import-progress {
+  padding: 2rem 1rem;
+  text-align: center;
+}
+.import-progress progress {
+  width: min(100%, 32rem);
+  height: 1rem;
+  accent-color: var(--green);
 }
 .dropzone {
   display: flex;
