@@ -17,7 +17,12 @@ import {
   parseDate,
 } from "../../lib/finance";
 import { useApp, Modal, Field, AccountSelect } from "../../components/ui";
-import { buildCandidates, defaultProfile } from "./parse";
+import { buildCandidates, defaultProfile, duplicateChecker } from "./parse";
+import {
+  detectImport,
+  detectionPrompt,
+  validateDetectedProfile,
+} from "./detect";
 import type { Candidate, ParsedFile } from "./types";
 
 export function ImportDialog({
@@ -35,29 +40,19 @@ export function ImportDialog({
     [pages, setPages] = useState<number[]>([]);
   const [account, setAccount] = useState(data.accounts[0]?.id || "");
   const [profile, setProfile] = useState<ImportProfile>({ ...defaultProfile });
-  const [candidates, setCandidates] = useState<Candidate[]>(
-    initial?.map((m, i) => ({
-      movement: m,
-      row: i + 1,
-      duplicate: data.movements.some(
-        (old) =>
-          old.accountId === m.accountId &&
-          m.externalId &&
-          old.externalId === m.externalId,
-      )
-        ? "exact"
-        : data.movements.some((old) => old.fingerprint === m.fingerprint)
-          ? "possible"
-          : "none",
-      selected: !data.movements.some(
-        (old) =>
-          old.fingerprint === m.fingerprint ||
-          (m.externalId &&
-            old.externalId === m.externalId &&
-            old.accountId === m.accountId),
-      ),
-    })) || [],
-  );
+  const [candidates, setCandidates] = useState<Candidate[]>(() => {
+    const check = duplicateChecker(data.movements);
+    return (
+      initial?.map((movement, i) => ({
+        movement,
+        row: i + 1,
+        ...check(movement),
+      })) || []
+    );
+  });
+  const [dragging, setDragging] = useState(false);
+  const [detection, setDetection] = useState("");
+  const generation = useRef(0);
   const [errors, setErrors] = useState<string[]>([]),
     [loading, setLoading] = useState(false),
     [review, setReview] = useState(!!initial),
@@ -65,8 +60,18 @@ export function ImportDialog({
     [previewPage, setPreviewPage] = useState(0);
   const [editErrors, setEditErrors] = useState<Record<number, string>>({});
   const worker = useRef<Worker | null>(null);
-  useEffect(() => () => worker.current?.terminate(), []);
+  useEffect(
+    () => () => {
+      generation.current++;
+      worker.current?.terminate();
+    },
+    [],
+  );
   function read(selected: File, separator = delimiter) {
+    const current = ++generation.current;
+    setDelimiter(separator);
+    setDetection("");
+    setEditErrors({});
     setFile(selected);
     setLoading(true);
     setProgress(0);
@@ -78,21 +83,56 @@ export function ImportDialog({
       new URL("./import.worker.ts", import.meta.url),
       { type: "module" },
     );
-    worker.current.onmessage = (e) => {
+    worker.current.onmessage = async (e) => {
+      if (current !== generation.current) return;
       if (e.data.progress) setProgress(e.data.progress);
       if (e.data.error) {
         setErrors([e.data.error]);
         setLoading(false);
       }
       if (e.data.result) {
-        setParsed(e.data.result);
-        setSheet(0);
+        const result: ParsedFile = e.data.result;
+        const detected = detectImport(result);
+        let note = detected.complete
+          ? "Columnas y formatos detectados automáticamente en tu dispositivo."
+          : "No se han reconocido todas las columnas. Revisa las opciones avanzadas.";
+        try {
+          if (!detected.complete && (await db.models.get("chat"))?.ready) {
+            const { completion } = await import("../ai/client");
+            const sample = result.sheets[detected.sheet].rows
+              .slice(0, 15)
+              .map((row) => row.slice(0, 20).map((cell) => cell.slice(0, 120)));
+            const answer = await completion(
+              detectionPrompt,
+              JSON.stringify(sample),
+              true,
+            );
+            const suggested = validateDetectedProfile(
+              JSON.parse(answer),
+              result.sheets[detected.sheet].rows,
+            );
+            if (suggested) {
+              detected.profile = suggested;
+              note =
+                "Columnas detectadas por la IA local y comprobadas con las filas del archivo.";
+            } else
+              note =
+                "La propuesta de la IA no es válida. Revisa las opciones avanzadas.";
+          }
+        } catch {
+          note =
+            "La IA local no está disponible. Revisa la detección en opciones avanzadas.";
+        }
+        if (current !== generation.current) return;
+        setParsed(result);
+        setSheet(detected.sheet);
         setPages(
-          e.data.result.normalizedPdf
-            ? e.data.result.sheets.map((_: unknown, index: number) => index)
-            : [0],
+          result.normalizedPdf
+            ? result.sheets.map((_, index) => index)
+            : [detected.sheet],
         );
-        if (e.data.result.normalizedPdf) setProfile({ ...defaultProfile });
+        setProfile(detected.profile);
+        setDetection(note);
         setLoading(false);
       }
     };
@@ -122,10 +162,13 @@ export function ImportDialog({
     const failures: string[] = [];
     for (const index of selected) {
       const s = parsed!.sheets[index];
-      const result = buildCandidates(s.rows, profile, target, parsed!.name, [
-        ...data.movements,
-        ...all.map((c) => c.movement),
-      ]);
+      const result = buildCandidates(
+        s.rows,
+        profile,
+        target,
+        parsed!.name,
+        data.movements,
+      );
       all.push(...result.candidates);
       failures.push(...result.errors.map((e) => `${s.name}: ${e}`));
     }
@@ -157,13 +200,15 @@ export function ImportDialog({
           }
         }
         await db.transaction("rw", db.movements, async () => {
+          const savedExternal = new Set(
+            (await db.movements.toArray())
+              .filter((m) => m.externalId)
+              .map((m) => JSON.stringify([m.accountId, m.externalId])),
+          );
           for (const m of prepared) {
             if (
               m.externalId &&
-              (await db.movements
-                .where("[accountId+externalId]")
-                .equals([m.accountId, m.externalId])
-                .count())
+              savedExternal.has(JSON.stringify([m.accountId, m.externalId]))
             )
               continue;
             await db.movements.add(m);
@@ -191,7 +236,16 @@ export function ImportDialog({
         movement.description = value;
       }
       movement.fingerprint = fingerprint(movement);
-      next[index] = { ...next[index], movement };
+      next[index] = {
+        ...next[index],
+        movement,
+        ...(fingerprint(next[index].movement) !== movement.fingerprint
+          ? {
+              balanceMissing: false,
+              ...duplicateChecker(data.movements)(movement),
+            }
+          : {}),
+      };
       setCandidates(next);
       setEditErrors((errors) => {
         const copy = { ...errors };
@@ -213,15 +267,40 @@ export function ImportDialog({
       wide
     >
       <div className="steps">
-        <span className={!review ? "active" : ""}>1. Archivo y columnas</span>
+        <span className={!review ? "active" : ""}>
+          1. Archivo y vista previa
+        </span>
         <ArrowRight size={15} />
         <span className={review ? "active" : ""}>2. Revisar e importar</span>
       </div>
       {!review && (
         <>
-          <label className="dropzone">
+          <label
+            className={`dropzone${dragging ? " dragging" : ""}${file ? " has-file" : ""}`}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "copy";
+              setDragging(true);
+            }}
+            onDragLeave={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node))
+                setDragging(false);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragging(false);
+              if (e.dataTransfer.files.length !== 1) {
+                notify("Suelta un solo archivo cada vez.");
+                return;
+              }
+              read(e.dataTransfer.files[0], "");
+            }}
+          >
             <Upload size={28} />
-            <strong>{file?.name || "Elige tu extracto bancario"}</strong>
+            <strong>
+              {file?.name ||
+                "Arrastra aquí tu extracto o haz clic para elegirlo"}
+            </strong>
             <span>
               CSV, Excel o PDF con texto · Máximo 100 MB · Tu archivo no se sube
             </span>
@@ -230,9 +309,12 @@ export function ImportDialog({
               type="file"
               accept=".csv,.tsv,.xls,.xlsx,.pdf"
               onChange={(e) => {
-                if (e.target.files?.[0]) read(e.target.files[0]);
+                if (e.target.files?.[0]) read(e.target.files[0], "");
               }}
             />
+            <span className="file-choice" aria-hidden="true">
+              {file ? "Cambiar archivo" : "Elegir archivo"}
+            </span>
           </label>
           {!data.accounts.length && (
             <div className="notice warning">
@@ -249,157 +331,205 @@ export function ImportDialog({
                     data={data}
                   />
                 </Field>
-                <Field label="Hoja / página">
-                  <select
-                    value={sheet}
-                    onChange={(e) => setSheet(Number(e.target.value))}
-                  >
-                    {parsed.sheets.map((s, i) => (
-                      <option key={i} value={i}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label="Perfil guardado">
-                  <select
-                    value={profile.id}
-                    onChange={(e) =>
-                      setProfile(
-                        data.profiles.find((p) => p.id === e.target.value) || {
-                          ...defaultProfile,
-                        },
-                      )
-                    }
-                  >
-                    <option value="">Personalizado</option>
-                    {data.profiles.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label="Fila de cabecera">
-                  <input
-                    type="number"
-                    min="1"
-                    max={Math.max(rows.length, 1)}
-                    value={profile.headerRow + 1}
-                    onChange={(e) =>
-                      setProfile({
-                        ...profile,
-                        headerRow: Math.max(0, Number(e.target.value) - 1),
-                      })
-                    }
-                  />
-                </Field>
-                <Field label="Formato de fecha">
-                  <select
-                    value={profile.dateFormat}
-                    onChange={(e) =>
-                      setProfile({
-                        ...profile,
-                        dateFormat: e.target
-                          .value as ImportProfile["dateFormat"],
-                      })
-                    }
-                  >
-                    <option value="DMY">Día / mes / año</option>
-                    <option value="MDY">Mes / día / año</option>
-                    <option value="YMD">Año / mes / día</option>
-                  </select>
-                </Field>
-                <Field label="Separador decimal">
-                  <select
-                    value={profile.decimal}
-                    onChange={(e) =>
-                      setProfile({
-                        ...profile,
-                        decimal: e.target.value as "," | ".",
-                      })
-                    }
-                  >
-                    <option value=",">Coma · 1.234,56</option>
-                    <option value=".">Punto · 1,234.56</option>
-                  </select>
-                </Field>
-                {file?.name.toLowerCase().match(/\.(csv|tsv)$/) && (
-                  <Field label="Separador CSV">
+              </div>
+              <p className="muted" role="status">
+                {detection}
+              </p>
+              <details className="import-advanced">
+                <summary>Opciones avanzadas</summary>
+                <div className="form-grid">
+                  <Field label="Hoja / página">
                     <select
-                      value={delimiter}
+                      value={sheet}
                       onChange={(e) => {
-                        setDelimiter(e.target.value);
-                        read(file, e.target.value);
+                        const index = Number(e.target.value);
+                        setSheet(index);
+                        setProfile(
+                          detectImport({
+                            ...parsed,
+                            sheets: [parsed.sheets[index]],
+                          }).profile,
+                        );
                       }}
                     >
-                      <option value="">Detectar</option>
-                      <option value=";">Punto y coma</option>
-                      <option value=",">Coma</option>
-                      <option value={"\t"}>Tabulador</option>
-                    </select>
-                  </Field>
-                )}
-              </div>
-              {parsed.sheets[sheet]?.page && (
-                <fieldset>
-                  <legend>Páginas que se importarán</legend>
-                  <div className="chips">
-                    {parsed.sheets.map((s, i) => (
-                      <label key={i}>
-                        <input
-                          type="checkbox"
-                          checked={pages.includes(i)}
-                          onChange={(e) =>
-                            setPages(
-                              e.target.checked
-                                ? [...pages, i]
-                                : pages.filter((p) => p !== i),
-                            )
-                          }
-                        />
-                        {s.name}
-                      </label>
-                    ))}
-                  </div>
-                </fieldset>
-              )}
-              <h3>Relaciona las columnas</h3>
-              <div className="form-grid columns-grid">
-                {Object.entries({
-                  date: "Fecha",
-                  description: "Concepto",
-                  amount: "Importe con signo",
-                  debit: "Cargo (alternativa)",
-                  credit: "Abono (alternativa)",
-                  merchant: "Comercio",
-                  externalId: "Identificador bancario",
-                }).map(([key, label]) => (
-                  <Field key={key} label={label}>
-                    <select
-                      value={
-                        profile.columns[key as keyof typeof profile.columns]
-                      }
-                      onChange={(e) =>
-                        setProfile({
-                          ...profile,
-                          columns: {
-                            ...profile.columns,
-                            [key]: Number(e.target.value),
-                          },
-                        })
-                      }
-                    >
-                      <option value={-1}>No usar</option>
-                      {Array.from({ length: maxColumns }, (_, i) => (
+                      {parsed.sheets.map((s, i) => (
                         <option key={i} value={i}>
-                          {i + 1}. {headers[i] || `Columna ${i + 1}`}
+                          {s.name}
                         </option>
                       ))}
                     </select>
                   </Field>
-                ))}
-              </div>
+                  <Field label="Perfil guardado">
+                    <select
+                      value={profile.id}
+                      onChange={(e) =>
+                        setProfile(
+                          data.profiles.find(
+                            (p) => p.id === e.target.value,
+                          ) || {
+                            ...defaultProfile,
+                          },
+                        )
+                      }
+                    >
+                      <option value="">Personalizado</option>
+                      {data.profiles.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Fila de cabecera">
+                    <input
+                      type="number"
+                      min="1"
+                      max={Math.max(rows.length, 1)}
+                      value={profile.headerRow + 1}
+                      onChange={(e) =>
+                        setProfile({
+                          ...profile,
+                          headerRow: Math.max(0, Number(e.target.value) - 1),
+                        })
+                      }
+                    />
+                  </Field>
+                  <Field label="Formato de fecha">
+                    <select
+                      value={profile.dateFormat}
+                      onChange={(e) =>
+                        setProfile({
+                          ...profile,
+                          dateFormat: e.target
+                            .value as ImportProfile["dateFormat"],
+                        })
+                      }
+                    >
+                      <option value="DMY">Día / mes / año</option>
+                      <option value="MDY">Mes / día / año</option>
+                      <option value="YMD">Año / mes / día</option>
+                    </select>
+                  </Field>
+                  <Field label="Separador decimal">
+                    <select
+                      value={profile.decimal}
+                      onChange={(e) =>
+                        setProfile({
+                          ...profile,
+                          decimal: e.target.value as "," | ".",
+                        })
+                      }
+                    >
+                      <option value=",">Coma · 1.234,56</option>
+                      <option value=".">Punto · 1,234.56</option>
+                    </select>
+                  </Field>
+                  {file?.name.toLowerCase().match(/\.(csv|tsv)$/) && (
+                    <Field label="Separador CSV">
+                      <select
+                        value={delimiter}
+                        onChange={(e) => {
+                          setDelimiter(e.target.value);
+                          read(file, e.target.value);
+                        }}
+                      >
+                        <option value="">Detectar</option>
+                        <option value=";">Punto y coma</option>
+                        <option value=",">Coma</option>
+                        <option value={"\t"}>Tabulador</option>
+                      </select>
+                    </Field>
+                  )}
+                </div>
+                {parsed.sheets[sheet]?.page && (
+                  <fieldset>
+                    <legend>Páginas que se importarán</legend>
+                    <div className="chips">
+                      {parsed.sheets.map((s, i) => (
+                        <label key={i}>
+                          <input
+                            type="checkbox"
+                            checked={pages.includes(i)}
+                            onChange={(e) =>
+                              setPages(
+                                e.target.checked
+                                  ? [...pages, i]
+                                  : pages.filter((p) => p !== i),
+                              )
+                            }
+                          />
+                          {s.name}
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+                )}
+                <h3>Relaciona las columnas</h3>
+                <div className="form-grid columns-grid">
+                  {Object.entries({
+                    date: "Fecha",
+                    description: "Concepto",
+                    amount: "Importe con signo",
+                    debit: "Cargo (alternativa)",
+                    credit: "Abono (alternativa)",
+                    merchant: "Comercio",
+                    externalId: "Identificador bancario",
+                    balance: "Saldo",
+                  }).map(([key, label]) => (
+                    <Field key={key} label={label}>
+                      <select
+                        value={
+                          profile.columns[
+                            key as keyof typeof profile.columns
+                          ] ?? -1
+                        }
+                        onChange={(e) =>
+                          setProfile({
+                            ...profile,
+                            columns: {
+                              ...profile.columns,
+                              [key]: Number(e.target.value),
+                            },
+                          })
+                        }
+                      >
+                        <option value={-1}>No usar</option>
+                        {Array.from({ length: maxColumns }, (_, i) => (
+                          <option key={i} value={i}>
+                            {i + 1}. {headers[i] || `Columna ${i + 1}`}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                  ))}
+                </div>
+                <div className="inline-form">
+                  <input
+                    aria-label="Nombre del perfil"
+                    placeholder="Nombre para guardar este perfil"
+                    value={profile.name}
+                    onChange={(e) =>
+                      setProfile({ ...profile, name: e.target.value })
+                    }
+                  />
+                  <button
+                    className="button secondary"
+                    disabled={!profile.name.trim()}
+                    onClick={() =>
+                      run(
+                        db.profiles.put({
+                          ...profile,
+                          id: profile.id || crypto.randomUUID(),
+                        }),
+                        "Perfil guardado",
+                      )
+                    }
+                  >
+                    Guardar perfil
+                  </button>
+                </div>
+              </details>
+              <h3>Vista previa</h3>
               <div className="table-scroll preview-table">
                 <table>
                   <thead>
@@ -423,31 +553,6 @@ export function ImportDialog({
                       ))}
                   </tbody>
                 </table>
-              </div>
-              <div className="inline-form">
-                <input
-                  aria-label="Nombre del perfil"
-                  placeholder="Nombre para guardar este perfil"
-                  value={profile.name}
-                  onChange={(e) =>
-                    setProfile({ ...profile, name: e.target.value })
-                  }
-                />
-                <button
-                  className="button secondary"
-                  disabled={!profile.name.trim()}
-                  onClick={() =>
-                    run(
-                      db.profiles.put({
-                        ...profile,
-                        id: profile.id || crypto.randomUUID(),
-                      }),
-                      "Perfil guardado",
-                    )
-                  }
-                >
-                  Guardar perfil
-                </button>
               </div>
               {parsed.warnings.map((warning, i) => (
                 <p className="muted" key={i}>
@@ -486,6 +591,7 @@ export function ImportDialog({
             <button
               className="text-button"
               onClick={() => {
+                generation.current++;
                 worker.current?.terminate();
                 setLoading(false);
               }}
@@ -522,7 +628,7 @@ export function ImportDialog({
               <strong>
                 {candidates.filter((c) => c.duplicate !== "none").length}
               </strong>{" "}
-              duplicados posibles o exactos
+              coincidencias con movimientos guardados
             </span>
             <span>
               <strong>{candidates.filter((c) => !c.selected).length}</strong>{" "}
@@ -530,9 +636,10 @@ export function ImportDialog({
             </span>
           </div>
           <p className="muted">
-            Los duplicados posibles empiezan desmarcados. Puedes incluir compras
-            legítimas iguales. Corrige fecha, concepto e importe antes de
-            guardar.
+            Solo comparamos con movimientos ya guardados en esta cuenta: fecha,
+            importe, concepto y saldo. Las repeticiones dentro del archivo se
+            conservan. Si falta el saldo en alguno de los dos, la coincidencia
+            queda seleccionada para que la revises.
           </p>
           <div className="table-scroll">
             <table>
@@ -542,6 +649,7 @@ export function ImportDialog({
                   <th>Fecha</th>
                   <th>Concepto</th>
                   <th>Importe</th>
+                  <th>Saldo</th>
                   <th>Estado</th>
                 </tr>
               </thead>
@@ -602,10 +710,17 @@ export function ImportDialog({
                           />
                         </td>
                         <td>
+                          {c.movement.balance === undefined
+                            ? "—"
+                            : money(c.movement.balance, c.movement.currency)}
+                        </td>
+                        <td>
                           {c.duplicate === "exact"
                             ? "Ya importado"
                             : c.duplicate === "possible"
-                              ? "Posible duplicado"
+                              ? c.balanceMissing
+                                ? "Revisar coincidencia: falta saldo"
+                                : "Posible duplicado"
                               : "Nuevo"}
                         </td>
                       </tr>
@@ -647,7 +762,7 @@ export function ImportDialog({
                   setReview(false);
                 }}
               >
-                Volver a columnas
+                Volver a vista previa
               </button>
             )}
             <button

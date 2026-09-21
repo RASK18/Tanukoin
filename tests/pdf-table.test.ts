@@ -84,10 +84,7 @@ it("conserva la primera fila sin cabecera, coincidencias y filas incompletas", (
     [],
   );
   expect(result.candidates).toHaveLength(2);
-  expect(result.candidates.map((c) => c.duplicate)).toEqual([
-    "none",
-    "possible",
-  ]);
+  expect(result.candidates.map((c) => c.duplicate)).toEqual(["none", "none"]);
   expect(result.errors).toHaveLength(1);
   expect(
     detectStatementColumns([

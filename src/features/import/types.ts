@@ -15,4 +15,5 @@ export interface Candidate {
   row: number;
   duplicate: "none" | "possible" | "exact";
   selected: boolean;
+  balanceMissing?: boolean;
 }

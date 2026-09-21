@@ -27,6 +27,7 @@ export interface Movement {
   merchant: string;
   date: string;
   bookingDate?: string;
+  balance?: number;
   timestamp?: string;
   categoryId?: string;
   categorySource: CategorySource;
@@ -99,6 +100,7 @@ export interface ImportProfile {
     credit: number;
     merchant: number;
     externalId: number;
+    balance?: number;
   };
 }
 export interface Settings {

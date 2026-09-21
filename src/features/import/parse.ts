@@ -15,6 +15,7 @@ export const defaultProfile: ImportProfile = {
     credit: -1,
     merchant: -1,
     externalId: -1,
+    balance: -1,
   },
 };
 export function buildCandidates(
@@ -26,12 +27,7 @@ export function buildCandidates(
 ): { candidates: Candidate[]; errors: string[] } {
   const candidates: Candidate[] = [],
     errors: string[] = [];
-  const seen = new Set(existing.map((m) => m.fingerprint));
-  const external = new Set(
-    existing
-      .filter((m) => m.accountId === account.id && m.externalId)
-      .map((m) => m.externalId),
-  );
+  const duplicateOfSaved = duplicateChecker(existing);
   const c = profile.columns;
   rows.slice(profile.headerRow + 1).forEach((row, index) => {
     const rowNumber = index + profile.headerRow + 2;
@@ -65,6 +61,10 @@ export function buildCandidates(
         id: crypto.randomUUID(),
         accountId: account.id,
         amount,
+        balance:
+          c.balance !== undefined && c.balance >= 0 && row[c.balance]?.trim()
+            ? parseAmount(row[c.balance], profile.decimal, account.currency)
+            : undefined,
         currency: account.currency,
         description,
         merchant: c.merchant >= 0 ? String(row[c.merchant] || "").trim() : "",
@@ -80,20 +80,7 @@ export function buildCandidates(
         createdAt: new Date().toISOString(),
       };
       m.fingerprint = fingerprint(m);
-      const duplicate =
-        m.externalId && external.has(m.externalId)
-          ? "exact"
-          : seen.has(m.fingerprint)
-            ? "possible"
-            : "none";
-      candidates.push({
-        movement: m,
-        row: rowNumber,
-        duplicate,
-        selected: duplicate === "none",
-      });
-      seen.add(m.fingerprint);
-      if (m.externalId) external.add(m.externalId);
+      candidates.push({ movement: m, row: rowNumber, ...duplicateOfSaved(m) });
     } catch (error) {
       errors.push(
         `Fila ${rowNumber}: ${error instanceof Error ? error.message : "Dato no válido"}`,
@@ -101,4 +88,37 @@ export function buildCandidates(
     }
   });
   return { candidates, errors };
+}
+
+export function duplicateChecker(existing: Movement[]) {
+  const byContent = new Map<string, Movement[]>();
+  const external = new Set<string>();
+  for (const m of existing) {
+    const key = fingerprint(m);
+    byContent.set(key, [...(byContent.get(key) || []), m]);
+    if (m.externalId) external.add(JSON.stringify([m.accountId, m.externalId]));
+  }
+  return (
+    m: Movement,
+  ): Pick<Candidate, "duplicate" | "selected" | "balanceMissing"> => {
+    if (
+      m.externalId &&
+      external.has(JSON.stringify([m.accountId, m.externalId]))
+    )
+      return { duplicate: "exact", selected: false };
+    const matches = byContent.get(fingerprint(m)) || [];
+    if (
+      m.balance !== undefined &&
+      matches.some((old) => old.balance === m.balance)
+    )
+      return { duplicate: "possible", selected: false };
+    // Older imports may lack a balance. Flag the uncertainty without dropping a row.
+    if (
+      matches.some(
+        (old) => old.balance === undefined || m.balance === undefined,
+      )
+    )
+      return { duplicate: "possible", selected: true, balanceMissing: true };
+    return { duplicate: "none", selected: true };
+  };
 }

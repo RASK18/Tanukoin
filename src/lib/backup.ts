@@ -34,6 +34,7 @@ const fields: Record<(typeof tables)[number], string[]> = {
     "merchant",
     "date",
     "bookingDate",
+    "balance",
     "timestamp",
     "categoryId",
     "categorySource",
@@ -206,6 +207,7 @@ export function validateBackup(input: unknown): Snapshot {
           [
             "amount",
             "openingBalance",
+            "balance",
             "bankBalance",
             "minAmount",
             "maxAmount",
@@ -286,6 +288,11 @@ export function validateBackup(input: unknown): Snapshot {
         )
           throw new Error("Perfil inválido");
         const cols = row.columns as Record<string, unknown>;
+        if (
+          cols.balance !== undefined &&
+          (!Number.isInteger(cols.balance) || Number(cols.balance) < -1)
+        )
+          throw new Error("Columna de saldo inválida");
         if (
           [
             "date",

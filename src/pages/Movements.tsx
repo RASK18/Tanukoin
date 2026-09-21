@@ -130,6 +130,7 @@ export function Movements({ onImport }: { onImport: () => void }) {
         "Cuenta",
         "Categoría",
         "Notas",
+        "Saldo",
       ],
       ...rows.map((m) => [
         m.date,
@@ -142,6 +143,11 @@ export function Movements({ onImport }: { onImport: () => void }) {
         data.accounts.find((a) => a.id === m.accountId)?.name,
         data.categories.find((c) => c.id === m.categoryId)?.name,
         m.notes,
+        m.balance === undefined
+          ? ""
+          : (m.balance / 10 ** currencyDigits(m.currency))
+              .toFixed(currencyDigits(m.currency))
+              .replace(".", ","),
       ]),
     ]
       .map((row) => row.map(csvCell).join(";"))

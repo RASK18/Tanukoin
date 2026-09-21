@@ -1377,14 +1377,52 @@ tbody tr:hover {
   font-size: 16px;
   color: #60774c;
 }
+.dropzone.dragging,
+.dropzone:focus-within {
+  border-color: #326c54;
+  background: #e2efdf;
+  outline: 2px solid #326c54;
+  outline-offset: 2px;
+}
+.import-advanced {
+  margin: 16px 0;
+  padding: 14px;
+  border: 1px solid var(--border, #dce5d9);
+  border-radius: 10px;
+}
+.import-advanced > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.import-advanced[open] > summary {
+  margin-bottom: 18px;
+}
 .dropzone span {
   font-size: 11px;
   color: #97a48b;
 }
 .dropzone input {
-  font-size: 12px;
-  max-width: 100%;
-  margin-top: 5px;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.dropzone .file-choice {
+  color: #326c54;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: underline;
+}
+.dropzone.has-file {
+  padding: 16px;
+  gap: 6px;
+}
+.dropzone.has-file > svg {
+  display: none;
 }
 .columns-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));

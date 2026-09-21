@@ -19,7 +19,7 @@ async function importFile(page: Page, name: string, buffer: Buffer) {
   ).toBeVisible();
 }
 const csv = Buffer.from(
-  "Fecha;Concepto;Importe\n15/09/2026;Compra supermercado;-54,32\n16/09/2026;Nomina;2540,00\n17/09/2026;Cafe;-2,50\n",
+  "Fecha;Concepto;Importe;Saldo\n15/09/2026;Compra supermercado;-54,32;100,00\n16/09/2026;Nomina;2540,00;2640,00\n17/09/2026;Cafe;-2,50;2637,50\n",
 );
 
 test("cuenta, importación CSV, edición, exportación y reimportación con duplicados", async ({
@@ -192,8 +192,59 @@ test("certificado PDF une conceptos y selecciona todas las páginas sin repetir 
   const csv = Buffer.concat(chunks).toString("utf8");
   expect(csv).toContain("-12,30");
   expect(csv).toContain("20,00");
-  expect(csv).not.toContain("987,70");
+  expect(csv).toContain("987,70");
   expect(csv).not.toContain("Firma del certificado");
+});
+
+test("arrastrar archivo detecta columnas y conserva operaciones iguales con distinto saldo", async ({
+  page,
+}) => {
+  await createAccount(page);
+  await page.goto("#/movimientos");
+  await page.getByRole("button", { name: "Importar", exact: true }).click();
+  const content =
+    "Saldo;Detalle;Fecha;Cargo\n100,00;Redondeo;20/09/2026;4,90\n95,10;Redondeo;20/09/2026;4,90";
+  const transfer = await page.evaluateHandle((content) => {
+    const dt = new DataTransfer();
+    dt.items.add(new File([content], "ficticio.csv", { type: "text/csv" }));
+    return dt;
+  }, content);
+  await page
+    .locator(".dropzone")
+    .dispatchEvent("dragover", { dataTransfer: transfer });
+  await expect(page.locator(".dropzone")).toHaveClass(/dragging/);
+  await page
+    .locator(".dropzone")
+    .dispatchEvent("drop", { dataTransfer: transfer });
+  await expect(
+    page.getByRole("button", { name: "Revisar movimientos" }),
+  ).toBeEnabled();
+  await expect(page.getByLabel("Formato de fecha")).not.toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Vista previa", exact: true }),
+  ).toBeVisible();
+  await page.screenshot({ path: "artifacts/import-simple.png" });
+  await page.getByText("Opciones avanzadas", { exact: true }).click();
+  await expect(
+    page.getByRole("combobox", { name: "Saldo", exact: true }),
+  ).toHaveValue("0");
+  await expect(
+    page.getByRole("combobox", { name: "Cargo (alternativa)", exact: true }),
+  ).toHaveValue("3");
+  await page.getByText("Opciones avanzadas", { exact: true }).click();
+  await page.getByRole("button", { name: "Revisar movimientos" }).click();
+  await expect(
+    page.getByText("Posible duplicado", { exact: true }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "Importar 2 movimientos" }).click();
+  await importFile(page, "ficticio.csv", Buffer.from(content));
+  await page.getByRole("button", { name: "Revisar movimientos" }).click();
+  await expect(
+    page.getByRole("button", { name: "Importar 0 movimientos" }),
+  ).toBeDisabled();
+  await expect(
+    page.getByText("Posible duplicado", { exact: true }),
+  ).toHaveCount(2);
 });
 test("historial de ubicaciones y copias requieren confirmación", async ({
   page,
