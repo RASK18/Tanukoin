@@ -1,4 +1,6 @@
 import { useMemo, useState } from "react";
+import { useLiveQuery } from "dexie-react-hooks";
+import { db } from "../data/db";
 import { Link } from "react-router-dom";
 import {
   ArrowDownLeft,
@@ -13,6 +15,7 @@ import {
   ShieldCheck,
   ChevronRight,
   MapPin,
+  X,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -37,7 +40,15 @@ import {
   totals,
 } from "../lib/finance";
 export function Dashboard({ onImport }: { onImport: () => void }) {
-  const { data } = useApp();
+  const { data, run } = useApp();
+  const settings = data.settings[0];
+  const chatReady = useLiveQuery(
+    async () => !!(await db.models.get("chat"))?.ready,
+    [],
+  );
+  const showImport =
+    data.movements.length === 0 && !settings?.hideImportWelcome;
+  const showTanu = chatReady === false && !settings?.hideTanuWelcome;
   const [month, setMonth] = useState(localDate().slice(0, 7));
   const [currency, setCurrency] = useState(data.accounts[0]?.currency || "EUR");
   const factor = 10 ** currencyDigits(currency);
@@ -124,72 +135,102 @@ export function Dashboard({ onImport }: { onImport: () => void }) {
           </div>
         }
       />
-      <div className="welcome-grid">
-        <section className="import-card">
-          <div className="section-heading">
-            <span className="feature-icon amber">
-              <Upload size={21} />
-            </span>
-            <div>
-              <h2>Empieza por tus movimientos</h2>
-              <p>Trae tus datos. El resto, lo organizamos contigo.</p>
-            </div>
-          </div>
-          <div className="import-options">
-            <button onClick={onImport}>
-              <span className="feature-icon cream">
-                <FileSpreadsheet size={23} />
+      {(showImport || showTanu) && (
+        <div
+          className={`welcome-grid ${showImport && showTanu ? "" : "welcome-single"}`}
+        >
+          {showImport && (
+            <section className="import-card">
+              <button
+                className="icon-button welcome-dismiss"
+                aria-label="Ocultar ayuda de importación"
+                onClick={() =>
+                  void run(
+                    db.settings.update("main", { hideImportWelcome: true }),
+                  )
+                }
+              >
+                <X size={16} />
+              </button>
+              <div className="section-heading">
+                <span className="feature-icon amber">
+                  <Upload size={21} />
+                </span>
+                <div>
+                  <h2>Empieza por tus movimientos</h2>
+                  <p>Trae tus datos. El resto, lo organizamos contigo.</p>
+                </div>
+              </div>
+              <div className="import-options">
+                <button onClick={onImport}>
+                  <span className="feature-icon cream">
+                    <FileSpreadsheet size={23} />
+                  </span>
+                  <span>
+                    <strong>Importar un archivo</strong>
+                    <small>CSV, Excel o PDF</small>
+                  </span>
+                  <ChevronRight size={17} />
+                </button>
+                <Link to="/banco">
+                  <span className="feature-icon blue">
+                    <Landmark size={23} />
+                  </span>
+                  <span>
+                    <strong>Conectar tu banco</strong>
+                    <small>Con Enable Banking</small>
+                  </span>
+                  <ChevronRight size={17} />
+                </Link>
+              </div>
+              <p className="mini-privacy">
+                <ShieldCheck size={13} /> Los archivos se procesan aquí. Nunca
+                se suben.
+              </p>
+            </section>
+          )}
+          {showTanu && (
+            <section className="ai-card">
+              <button
+                className="icon-button welcome-dismiss"
+                aria-label="Ocultar presentación de Tanu"
+                onClick={() =>
+                  void run(
+                    db.settings.update("main", { hideTanuWelcome: true }),
+                  )
+                }
+              >
+                <X size={16} />
+              </button>
+              <div className="ai-copy">
+                <span className="eyebrow">
+                  <Sparkles size={13} /> INTELIGENCIA, CON PRIVACIDAD
+                </span>
+                <h2>
+                  Conoce a Tanu<span>.</span>
+                </h2>
+                <p>
+                  Un poco de ayuda para entender
+                  <br />
+                  mejor tus finanzas. Siempre local.
+                </p>
+                <Link to="/ia" className="text-link">
+                  Descubre tu IA local <ArrowRight size={15} />
+                </Link>
+              </div>
+              <img
+                src={`${import.meta.env.BASE_URL}tanu.webp`}
+                alt="Tanu con su libreta"
+              />
+              <span className="ai-card-decoration">
+                Tu pequeño
+                <br />
+                aliado financiero
               </span>
-              <span>
-                <strong>Importar un archivo</strong>
-                <small>CSV, Excel o PDF</small>
-              </span>
-              <ChevronRight size={17} />
-            </button>
-            <Link to="/banco">
-              <span className="feature-icon blue">
-                <Landmark size={23} />
-              </span>
-              <span>
-                <strong>Conectar tu banco</strong>
-                <small>Con Enable Banking</small>
-              </span>
-              <ChevronRight size={17} />
-            </Link>
-          </div>
-          <p className="mini-privacy">
-            <ShieldCheck size={13} /> Los archivos se procesan aquí. Nunca se
-            suben.
-          </p>
-        </section>
-        <section className="ai-card">
-          <div className="ai-copy">
-            <span className="eyebrow">
-              <Sparkles size={13} /> INTELIGENCIA, CON PRIVACIDAD
-            </span>
-            <h2>
-              Conoce a Tanu<span>.</span>
-            </h2>
-            <p>
-              Un poco de ayuda para entender
-              <br />
-              mejor tus finanzas. Siempre local.
-            </p>
-            <Link to="/ia" className="text-link">
-              Descubre tu IA local <ArrowRight size={15} />
-            </Link>
-          </div>
-          <img
-            src={`${import.meta.env.BASE_URL}tanu.webp`}
-            alt="Tanu con su libreta"
-          />
-          <span className="ai-card-decoration">
-            Tu pequeño
-            <br />
-            aliado financiero
-          </span>
-        </section>
-      </div>
+            </section>
+          )}
+        </div>
+      )}
       <div className="metrics">
         {[
           {

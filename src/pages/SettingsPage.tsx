@@ -202,6 +202,26 @@ export function SettingsPage() {
         <div className="card-heading">
           <h2>Preferencias</h2>
         </div>
+        <p>
+          Puedes recuperar las ayudas de bienvenida que hayas cerrado en el
+          resumen. Solo aparecerán si aún no tienes movimientos o el chat local
+          preparado.
+        </p>
+        <button
+          className="button secondary"
+          disabled={!settings?.hideImportWelcome && !settings?.hideTanuWelcome}
+          onClick={() =>
+            void run(
+              db.settings.update("main", {
+                hideImportWelcome: false,
+                hideTanuWelcome: false,
+              }),
+              "Ayudas de bienvenida restablecidas",
+            )
+          }
+        >
+          Restablecer ayudas de bienvenida
+        </button>
         <form
           className="inline-form"
           onSubmit={(e) => {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { NavLink, Route, Routes, useNavigate } from "react-router-dom";
+import { NavLink, Route, Routes } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useRegisterSW } from "virtual:pwa-register/react";
 import {
@@ -13,12 +13,10 @@ import {
   Sparkles,
   Settings,
   ShieldCheck,
-  Search,
   Menu,
   X,
   Download,
   WifiOff,
-  Leaf,
 } from "lucide-react";
 import { db, initialize, readSnapshot } from "./data/db";
 import { emptySnapshot } from "./data/types";
@@ -53,9 +51,7 @@ export function App() {
     [online, setOnline] = useState(navigator.onLine),
     [sidebar, setSidebar] = useState(false),
     [importing, setImporting] = useState(false),
-    [search, setSearch] = useState(""),
     [remoteVersion, setRemoteVersion] = useState("");
-  const navigate = useNavigate();
   const updateRequested = useRef(false);
   const safeToReload = useRef(true);
   safeToReload.current = !busy && !dirty;
@@ -202,15 +198,24 @@ export function App() {
     );
   return (
     <AppContext.Provider value={context}>
-      <header className="topbar">
+      <button
+        className="icon-button mobile-menu"
+        aria-label={sidebar ? "Cerrar menú" : "Abrir menú"}
+        aria-expanded={sidebar}
+        aria-controls="app-sidebar"
+        onClick={() => setSidebar(!sidebar)}
+      >
+        {sidebar ? <X /> : <Menu />}
+      </button>
+      {sidebar && (
         <button
-          className="icon-button mobile-menu"
-          aria-label="Abrir menú"
-          onClick={() => setSidebar(!sidebar)}
-        >
-          <Menu />
-        </button>
-        <NavLink to="/" className="brand">
+          className="sidebar-backdrop"
+          aria-label="Cerrar menú"
+          onClick={() => setSidebar(false)}
+        />
+      )}
+      <aside id="app-sidebar" className={`sidebar ${sidebar ? "is-open" : ""}`}>
+        <NavLink to="/" className="brand" onClick={() => setSidebar(false)}>
           <img src={`${import.meta.env.BASE_URL}tanu.webp`} alt="" />
           <span>
             <strong>
@@ -219,46 +224,6 @@ export function App() {
             <small>Tus finanzas, en tus manos</small>
           </span>
         </NavLink>
-        <div className="header-badges">
-          <span>
-            <ShieldCheck size={13} /> Datos locales
-          </span>
-          <span>
-            <Leaf size={13} /> Sin nube
-          </span>
-        </div>
-        <form
-          className="global-search"
-          onSubmit={(e) => {
-            e.preventDefault();
-            navigate(`/movimientos?buscar=${encodeURIComponent(search)}`);
-          }}
-        >
-          <Search size={17} />
-          <input
-            aria-label="Buscar movimientos"
-            placeholder="Buscar entre tus movimientos…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          <kbd>↵</kbd>
-        </form>
-        <div className="privacy-label">
-          <ShieldCheck size={23} />
-          <span>
-            <strong>Tu espacio privado</strong>
-            <small>Solo en este navegador</small>
-          </span>
-        </div>
-      </header>
-      {sidebar && (
-        <button
-          className="sidebar-backdrop"
-          aria-label="Cerrar menú"
-          onClick={() => setSidebar(false)}
-        />
-      )}
-      <aside className={`sidebar ${sidebar ? "is-open" : ""}`}>
         <span className="nav-label">TU ESPACIO</span>
         <nav>
           {links.map(([path, label, Icon]) => (
@@ -278,16 +243,12 @@ export function App() {
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <div className="tanu-note">
-            <img
-              src={`${import.meta.env.BASE_URL}tanu.webp`}
-              alt="Tanu, tu compañero de finanzas"
-            />
-            <p>
-              Pequeñas decisiones.
-              <br />
-              <strong>Grandes libertades.</strong>
-            </p>
+          <div className="privacy-label">
+            <ShieldCheck size={20} aria-hidden="true" />
+            <span>
+              <strong>Datos solo en este navegador</strong>
+              <small>Sin sincronización en la nube</small>
+            </span>
           </div>
           <div className="version">
             <span className={`status-dot ${online ? "" : "offline"}`} />

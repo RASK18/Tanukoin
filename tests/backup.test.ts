@@ -14,7 +14,11 @@ it("restaura datos atómicamente y no restaura consentimientos de red", async ()
     bank: "Banco",
     currency: "EUR",
   });
-  await db.settings.update("main", { maps: true });
+  await db.settings.update("main", {
+    maps: true,
+    hideImportWelcome: true,
+    hideTanuWelcome: false,
+  });
   const profile = {
     ...defaultProfile,
     columns: { ...defaultProfile.columns, balance: 3 },
@@ -35,9 +39,23 @@ it("restaura datos atómicamente y no restaura consentimientos de red", async ()
   await restoreBackup(raw);
   expect(await db.accounts.count()).toBe(1);
   expect((await db.settings.get("main"))?.maps).toBe(false);
+  expect((await db.settings.get("main"))?.hideImportWelcome).toBe(true);
+  expect((await db.settings.get("main"))?.hideTanuWelcome).toBe(false);
   expect((await db.movements.toArray())[0].balance).toBe(10000);
   raw.data.movements[0].balance = "100";
   expect(() => validateBackup(raw)).toThrow();
+});
+it("acepta copias antiguas y rechaza preferencias de bienvenida inválidas", async () => {
+  const raw = JSON.parse(await exportBackup());
+  expect(() => validateBackup(raw)).not.toThrow();
+  for (const key of ["hideImportWelcome", "hideTanuWelcome"]) {
+    raw.data.settings[0][key] = "true";
+    await expect(restoreBackup(raw)).rejects.toThrow(
+      "Preferencia de bienvenida",
+    );
+    expect((await db.settings.get("main"))?.timezone).toBe("Europe/Madrid");
+    delete raw.data.settings[0][key];
+  }
 });
 it("rechaza campos secretos, referencias rotas y versiones desconocidas sin borrar datos", async () => {
   await db.accounts.add({

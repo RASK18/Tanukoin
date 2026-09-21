@@ -76,7 +76,15 @@ const fields: Record<(typeof tables)[number], string[]> = {
   locations: ["id", "lat", "lng", "start", "end", "accuracy", "name", "source"],
   assignments: ["id", "movementId", "locationId", "status", "evidence"],
   profiles: ["id", "name", "headerRow", "dateFormat", "decimal", "columns"],
-  settings: ["id", "maps", "search", "banking", "timezone"],
+  settings: [
+    "id",
+    "maps",
+    "search",
+    "banking",
+    "timezone",
+    "hideImportWelcome",
+    "hideTanuWelcome",
+  ],
 };
 const required: Record<(typeof tables)[number], Record<string, string>> = {
   accounts: { name: "string", bank: "string", currency: "string" },
@@ -313,6 +321,12 @@ export function validateBackup(input: unknown): Snapshot {
     categoryIds = new Set(s.categories.map((c) => c.id)),
     movementIds = new Set(s.movements.map((m) => m.id)),
     locationIds = new Set(s.locations.map((l) => l.id));
+  for (const setting of s.settings) {
+    for (const key of ["hideImportWelcome", "hideTanuWelcome"] as const) {
+      if (setting[key] !== undefined && typeof setting[key] !== "boolean")
+        throw new Error("Preferencia de bienvenida no válida");
+    }
+  }
   if (s.settings.length !== 1 || s.settings[0].id !== "main")
     throw new Error("Ajustes inválidos");
   try {

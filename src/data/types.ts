@@ -104,6 +104,8 @@ export interface ImportProfile {
   };
 }
 export interface Settings {
+  hideImportWelcome?: boolean;
+  hideTanuWelcome?: boolean;
   id: "main";
   maps: boolean;
   search: boolean;

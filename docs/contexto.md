@@ -58,6 +58,20 @@ El esquema IndexedDB es 1. Los campos opcionales `Movement.balance` y `ImportPro
 
 La presencia de una función en código no sustituye las validaciones reales pendientes indicadas más abajo.
 
+## Navegación y distribución
+
+- La marca (Tanu y nombre Tanukoin) encabeza la barra lateral. Se elimina la topbar y su buscador; la búsqueda sigue disponible en Movimientos.
+- El pie de la barra lateral reúne el mensaje «Datos solo en este navegador / Sin sincronización en la nube», el estado de conexión y la versión. Sustituye la ilustración repetida y los avisos redundantes de la cabecera.
+- En móvil, un botón independiente abre y cierra la barra lateral; el menú cerrado no recibe foco y la barra permite desplazamiento en pantallas bajas.
+- Validación: compilación con comprobación de tipos y las dos pruebas existentes de navegador de navegación móvil y diseño de escritorio, ambas superadas. Captura de escritorio revisada visualmente. Cambio local, sin publicación.
+
+## Ayudas de bienvenida del resumen
+
+- «Empieza por tus movimientos» solo aparece sin movimientos en todo el historial, independientemente del mes o moneda seleccionados. «Conoce a Tanu» aparece mientras el modelo de chat no esté preparado; preparar únicamente embeddings no la oculta. Se consulta el estado local sin iniciar descargas.
+- Cada tarjeta permite cerrarse con una × accesible. Las preferencias opcionales `hideImportWelcome` y `hideTanuWelcome` se guardan en IndexedDB y se conservan en las copias de seguridad, sin migrar el esquema. Ajustes → Preferencias permite restablecer los cierres; las condiciones automáticas siguen aplicándose. Si se eliminan todos los movimientos o se retira el modelo, la ayuda correspondiente puede reaparecer salvo que se haya cerrado manualmente.
+- Una sola tarjeta ocupa el ancho disponible y la de Tanu se compacta en escritorio. Si no queda ninguna, se elimina el bloque completo sin dejar espacio vacío.
+- Validación: compilación con tipos, 28 pruebas unitarias y tres pruebas existentes de navegador (copias, móvil y escritorio). Comprobación adicional en Chromium de cierres independientes, persistencia al recargar, restablecimiento, estados de chat pendiente/preparado, embeddings y movimientos fuera del período/moneda. Capturas de escritorio y móvil revisadas. Estados de modelos simulados, sin descarga ni ejecución de IA real. Sin publicación.
+
 ## Cambios recientes de importación
 
 ### Saldo en Tus movimientos
