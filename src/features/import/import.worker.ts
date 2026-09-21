@@ -3,6 +3,11 @@ import * as XLSX from "xlsx";
 import * as pdfjs from "pdfjs-dist";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import type { ParsedFile, Sheet } from "./types";
+import {
+  detectStatementColumns,
+  statementRows,
+  type PdfText,
+} from "./pdf-table";
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 self.onmessage = async (
   event: MessageEvent<{ file: File; delimiter?: string }>,
@@ -61,9 +66,33 @@ self.onmessage = async (
         cMapUrl: `${base}cmaps/`,
         cMapPacked: true,
       }).promise;
+      let statementColumns: ReturnType<typeof detectStatementColumns>;
       for (let page = 1; page <= doc.numPages; page++) {
         const p = await doc.getPage(page),
           content = await p.getTextContent();
+        const positioned: PdfText[] = content.items.flatMap((item) =>
+          "str" in item && item.str.trim()
+            ? [
+                {
+                  x: item.transform[4],
+                  y: item.transform[5],
+                  width: item.width,
+                  text: item.str,
+                },
+              ]
+            : [],
+        );
+        statementColumns ??= detectStatementColumns(positioned);
+        if (statementColumns) {
+          result.normalizedPdf = true;
+          result.sheets.push({
+            name: `Página ${page}`,
+            page,
+            rows: statementRows(positioned, statementColumns),
+          });
+          self.postMessage({ progress: page / doc.numPages });
+          continue;
+        }
         const lines = new Map<
           number,
           { x: number; text: string; width: number }[]
@@ -102,7 +131,9 @@ self.onmessage = async (
           "Este PDF no contiene texto extraíble. Parece escaneado: utiliza CSV, Excel o un PDF digital.",
         );
       result.warnings.push(
-        "PDF: selecciona las páginas, revisa las columnas y corrige las filas partidas antes de importar.",
+        result.normalizedPdf
+          ? `Extracto reconocido: ${result.sheets.length} páginas seleccionadas. Se han unido los conceptos de varias líneas y separado el importe del saldo. Revisa los movimientos antes de importar.`
+          : "PDF: selecciona las páginas, revisa las columnas y corrige las filas partidas antes de importar.",
       );
     } else
       throw new Error("Utiliza un archivo CSV, XLS, XLSX o PDF con texto.");

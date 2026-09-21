@@ -104,15 +104,19 @@ for (const bookType of ["xlsx", "xls"] as const)
     await page.getByRole("button", { name: "Importar 1 movimientos" }).click();
     await expect(page.getByText("Compra Excel", { exact: true })).toBeVisible();
   });
-function textPdf() {
-  const content =
-    "BT /F1 12 Tf 40 760 Td (Fecha) Tj 130 0 Td (Concepto) Tj 200 0 Td (Importe) Tj -330 -24 Td (19/09/2026) Tj 130 0 Td (Compra PDF) Tj 200 0 Td (-12,30) Tj ET";
+function textPdf(
+  contents = [
+    "BT /F1 12 Tf 40 760 Td (Fecha) Tj 130 0 Td (Concepto) Tj 200 0 Td (Importe) Tj -330 -24 Td (19/09/2026) Tj 130 0 Td (Compra PDF) Tj 200 0 Td (-12,30) Tj ET",
+  ],
+) {
   const objects = [
     "<< /Type /Catalog /Pages 2 0 R >>",
-    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+    `<< /Type /Pages /Kids [${contents.map((_, i) => `${4 + i * 2} 0 R`).join(" ")}] /Count ${contents.length} >>`,
     "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+    ...contents.flatMap((content, i) => [
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents ${5 + i * 2} 0 R >>`,
+      `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+    ]),
   ];
   let pdf = "%PDF-1.4\n";
   const offsets = [0];
@@ -121,10 +125,12 @@ function textPdf() {
     pdf += `${i + 1} 0 obj\n${o}\nendobj\n`;
   });
   const xref = pdf.length;
-  pdf += `xref\n0 6\n0000000000 65535 f \n${offsets
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets
     .slice(1)
     .map((o) => `${String(o).padStart(10, "0")} 00000 n \n`)
-    .join("")}trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
+    .join(
+      "",
+    )}trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
   return Buffer.from(pdf);
 }
 test("PDF con texto se procesa localmente y se puede revisar", async ({
@@ -138,6 +144,56 @@ test("PDF con texto se procesa localmente y se puede revisar", async ({
   ).toBeEnabled();
   await page.getByRole("button", { name: "Importar 1 movimientos" }).click();
   await expect(page.getByText("Compra PDF", { exact: true })).toBeVisible();
+});
+
+test("certificado PDF une conceptos y selecciona todas las páginas sin repetir cabeceras", async ({
+  page,
+}) => {
+  const cell = (x: number, y: number, value: string) =>
+    `BT /F1 7 Tf ${x} ${y} Td (${value}) Tj ET`;
+  const first = [
+    cell(230, 700, "Titular ficticio"),
+    cell(89, 570, "FE.ANOTAC"),
+    cell(139, 570, "IMPORTE"),
+    cell(190, 570, "SALDO"),
+    cell(347, 570, "CONCEPTO"),
+    cell(230, 558, "COMPRA EN"),
+    cell(89, 547, "19/09/2026"),
+    cell(145, 547, "-12,30"),
+    cell(190, 547, "987,70"),
+    cell(350, 547, "TIENDA FICTICIA"),
+  ].join("\n");
+  const second = [
+    cell(230, 780, "ABONO POR"),
+    cell(89, 769, "18/09/2026"),
+    cell(145, 769, "20,00"),
+    cell(190, 769, "1000,00"),
+    cell(350, 769, "DEVOLUCION"),
+    cell(230, 730, "Firma del certificado"),
+  ].join("\n");
+  await createAccount(page);
+  await importFile(page, "certificado-ficticio.pdf", textPdf([first, second]));
+  await expect(
+    page.getByText(/Extracto reconocido: 2 páginas seleccionadas/),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Revisar movimientos" }).click();
+  await page.getByRole("button", { name: "Importar 2 movimientos" }).click();
+  await expect(
+    page.getByText("COMPRA EN TIENDA FICTICIA", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("ABONO POR DEVOLUCION", { exact: true }),
+  ).toBeVisible();
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Exportar", exact: true }).click();
+  const stream = await (await downloadPromise).createReadStream();
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream!) chunks.push(Buffer.from(chunk));
+  const csv = Buffer.concat(chunks).toString("utf8");
+  expect(csv).toContain("-12,30");
+  expect(csv).toContain("20,00");
+  expect(csv).not.toContain("987,70");
+  expect(csv).not.toContain("Firma del certificado");
 });
 test("historial de ubicaciones y copias requieren confirmación", async ({
   page,

@@ -87,7 +87,12 @@ export function ImportDialog({
       if (e.data.result) {
         setParsed(e.data.result);
         setSheet(0);
-        setPages([0]);
+        setPages(
+          e.data.result.normalizedPdf
+            ? e.data.result.sheets.map((_: unknown, index: number) => index)
+            : [0],
+        );
+        if (e.data.result.normalizedPdf) setProfile({ ...defaultProfile });
         setLoading(false);
       }
     };

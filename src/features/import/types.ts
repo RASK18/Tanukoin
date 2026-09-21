@@ -8,6 +8,7 @@ export interface ParsedFile {
   name: string;
   sheets: Sheet[];
   warnings: string[];
+  normalizedPdf?: boolean;
 }
 export interface Candidate {
   movement: Movement;
