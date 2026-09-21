@@ -72,6 +72,12 @@ La presencia de una función en código no sustituye las validaciones reales pen
 - Una sola tarjeta ocupa el ancho disponible y la de Tanu se compacta en escritorio. Si no queda ninguna, se elimina el bloque completo sin dejar espacio vacío.
 - Validación: compilación con tipos, 28 pruebas unitarias y tres pruebas existentes de navegador (copias, móvil y escritorio). Comprobación adicional en Chromium de cierres independientes, persistencia al recargar, restablecimiento, estados de chat pendiente/preparado, embeddings y movimientos fuera del período/moneda. Capturas de escritorio y móvil revisadas. Estados de modelos simulados, sin descarga ni ejecución de IA real. Sin publicación.
 
+## Importación de historiales grandes en el mapa
+
+- La acumulación de ubicaciones devueltas por el worker se realiza iterando sobre un `Map`, sin expandir el historial como argumentos de `push`, lo que provocaba `RangeError: Maximum call stack size exceeded` con archivos grandes. Los identificadores guardados se consultan mediante un `Set` para evitar comparar cada punto con todo el historial existente.
+- Se mantiene la eliminación de duplicados entre archivos y frente a ubicaciones guardadas, la revisión antes de confirmar y el guardado transaccional. El límite sigue siendo 100 MB por archivo.
+- Validación: error reproducido y lectura/acumulación corregidas contrastadas localmente con un historial privado, sin incorporar datos ni rutas al repositorio. Compilación con tipos y 28 pruebas unitarias superadas. Una regresión en Chromium con 225.000 ubicaciones ficticias verifica archivos solapados, revisión sin guardar, descarte, confirmación, persistencia tras recargar y reimportación sin duplicados. El archivo privado no se ha guardado en el navegador de pruebas. Cambio local, sin publicación.
+
 ## Cambios recientes de importación
 
 ### Saldo en Tus movimientos

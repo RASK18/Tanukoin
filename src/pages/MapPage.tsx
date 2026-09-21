@@ -133,7 +133,8 @@ export function MapPage() {
     setBusy(true);
     setStaged(null);
     setSkipped(0);
-    let all: Location[] = [];
+    const all = new Map<string, Location>();
+    const savedIds = new Set(data.locations.map((location) => location.id));
     let omissions = 0;
     try {
       for (const file of files) {
@@ -158,14 +159,12 @@ export function MapPage() {
             reject(new Error("No se pudo procesar el historial."));
           worker.current.postMessage(file);
         });
-        all.push(...result.locations);
+        // Un historial grande puede superar el límite de argumentos de push(...).
+        for (const location of result.locations)
+          if (!savedIds.has(location.id)) all.set(location.id, location);
         omissions += result.skipped;
       }
-      setStaged(
-        [...new Map(all.map((l) => [l.id, l])).values()].filter(
-          (l) => !data.locations.some((old) => old.id === l.id),
-        ),
-      );
+      setStaged([...all.values()]);
       setSkipped(omissions);
     } catch (e) {
       notify(String(e));
