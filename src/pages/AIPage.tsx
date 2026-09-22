@@ -3,11 +3,9 @@ import { useLiveQuery } from "dexie-react-hooks";
 import {
   Download,
   Sparkles,
-  ShieldCheck,
   Check,
   Trash2,
   Cpu,
-  MessageCircle,
   X,
 } from "lucide-react";
 import { db } from "../data/db";
@@ -17,15 +15,15 @@ import {
   removeModel,
   cancelModel,
   categorize,
-  gpuAvailable,
 } from "../features/ai/client";
+import { ChatModels } from "../features/ai/ChatModels";
 export function AIPage() {
   const { data, run, notify, setBusy } = useApp();
   const models = useLiveQuery(() => db.models.toArray(), []) || [];
   const [working, setWorking] = useState<"embeddings" | "chat" | null>(null),
     [progress, setProgress] = useState(0),
     [classifying, setClassifying] = useState(false),
-    [gpu, setGpu] = useState<string>("");
+    [chatWorking, setChatWorking] = useState(false);
   async function prepare(id: "embeddings" | "chat", download: boolean) {
     setWorking(id);
     setBusy(true);
@@ -50,31 +48,10 @@ export function AIPage() {
         title="IA local, de verdad"
         description="Los modelos se descargan en tu dispositivo. Tus movimientos y preguntas se quedan aquí."
       />
-      <section className="ai-explainer card">
-        <div>
-          <span className="feature-icon sage">
-            <Sparkles size={24} />
-          </span>
-          <h2>
-            Dos formas de ayudarte.
-            <br />
-            La misma privacidad.
-          </h2>
-          <p>
-            La búsqueda semántica entiende similitudes. El chat te ayuda a
-            consultar tus datos con tus propias palabras. Puedes usar una, las
-            dos o ninguna.
-          </p>
-          <span className="privacy-pill">
-            <ShieldCheck size={14} /> Sin suscripciones de IA · Sin enviar
-            conversaciones
-          </span>
-        </div>
-        <img
-          src={`${import.meta.env.BASE_URL}tanu.webp`}
-          alt="Tanu con su libreta verde"
-        />
-      </section>
+      <ChatModels
+        disabled={working !== null || classifying}
+        onWorking={setChatWorking}
+      />
       <div className="model-grid">
         {(
           [
@@ -88,18 +65,6 @@ export function AIPage() {
               model: "MiniLM multilingüe · cuantizado",
               size: "Aproximadamente 118 MB + recursos auxiliares",
               requirements: "Funciona con CPU / WebAssembly.",
-            },
-            {
-              id: "chat",
-              title: "Habla con Tanu",
-              subtitle: "CHAT LOCAL",
-              Icon: MessageCircle,
-              description:
-                "Pregunta por tus gastos, compara períodos y encuentra cargos. Las cifras se calculan sobre tus datos.",
-              model: "Qwen3 1.7B · 4 bits",
-              size: "Descarga de alrededor de 1 GB; necesita memoria adicional para ejecutarse",
-              requirements:
-                "Necesita WebGPU, shader-f16 y memoria suficiente (aprox. 2 GB de GPU según el modelo).",
             },
           ] as const
         ).map((m) => {
@@ -142,7 +107,7 @@ export function AIPage() {
               )}
               <div className="button-row">
                 <button
-                  disabled={working !== null}
+                  disabled={working !== null || chatWorking}
                   className="button primary"
                   onClick={() => prepare(m.id, true)}
                 >
@@ -150,14 +115,14 @@ export function AIPage() {
                   {state?.ready ? "Reparar descarga" : "Descargar modelo"}
                 </button>
                 <button
-                  disabled={working !== null}
+                  disabled={working !== null || chatWorking}
                   className="button secondary"
                   onClick={() => prepare(m.id, false)}
                 >
                   Comprobar offline
                 </button>
                 <button
-                  disabled={working !== null}
+                  disabled={working !== null || chatWorking}
                   className="icon-button"
                   aria-label={`Eliminar modelo ${m.title}`}
                   onClick={() =>
@@ -174,8 +139,6 @@ export function AIPage() {
                     className="button secondary"
                     onClick={() => {
                       cancelModel(m.id);
-                      setWorking(null);
-                      setBusy(false);
                     }}
                   >
                     <X size={14} /> Cancelar
@@ -201,6 +164,8 @@ export function AIPage() {
             className="button primary"
             disabled={
               classifying ||
+              chatWorking ||
+              working !== null ||
               !models.find((m) => m.id === "embeddings")?.ready ||
               !data.movements.length
             }
@@ -259,20 +224,7 @@ export function AIPage() {
           >
             Revertir categorías de IA
           </button>
-          <button
-            className="text-link"
-            onClick={async () =>
-              setGpu(
-                (await gpuAvailable())
-                  ? "Este navegador dispone de WebGPU compatible. La carga del modelo comprobará la memoria real."
-                  : "No se ha detectado WebGPU compatible. Los embeddings siguen disponibles con CPU.",
-              )
-            }
-          >
-            Comprobar compatibilidad del chat
-          </button>
         </div>
-        {gpu && <p className="notice">{gpu}</p>}
       </section>
       <p className="muted">
         El navegador puede eliminar su almacenamiento. Si falta algún archivo

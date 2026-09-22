@@ -1,3 +1,4 @@
+import { getActiveChatModel } from "../ai/model-store";
 import { useEffect, useRef, useState } from "react";
 import {
   Upload,
@@ -108,7 +109,7 @@ export function ImportDialog({
           ? "Columnas y formatos detectados automáticamente en tu dispositivo."
           : "No se han reconocido todas las columnas. Revisa las opciones avanzadas.";
         try {
-          if (!detected.complete && (await db.models.get("chat"))?.ready) {
+          if (!detected.complete && (await getActiveChatModel())) {
             const { completion } = await import("../ai/client");
             const sample = result.sheets[detected.sheet].rows
               .slice(0, 15)

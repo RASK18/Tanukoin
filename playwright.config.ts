@@ -1,6 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 export default defineConfig({
   testDir: "./tests/e2e",
+  outputDir: process.env.TEST_CHAT_VARIANT
+    ? `test-results/models-${process.env.TEST_CHAT_VARIANT}`
+    : "test-results/ui",
   timeout: 60000,
   expect: { timeout: 10000 },
   workers: 1,
@@ -8,7 +11,15 @@ export default defineConfig({
     baseURL: "http://127.0.0.1:4173/Tanukoin/",
     trace: "retain-on-failure",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    {
+      name: process.env.TEST_BROWSER_CHANNEL || "chromium",
+      use: {
+        ...devices["Desktop Chrome"],
+        channel: process.env.TEST_BROWSER_CHANNEL || undefined,
+      },
+    },
+  ],
   webServer: {
     command:
       "node node_modules/vite/bin/vite.js preview --host 127.0.0.1 --port 4173",

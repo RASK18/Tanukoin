@@ -1,19 +1,13 @@
 import { db } from "../../data/db";
 import type { Category, Movement } from "../../data/types";
 import { normalize } from "../../lib/finance";
-import { CHAT_MODEL, EMBEDDING_CACHE, MODEL_REVISION } from "./constants";
-import type { WebWorkerMLCEngine } from "@mlc-ai/web-llm";
-let embeddingWorker: Worker | null = null,
-  chatWorker: Worker | null = null,
-  engine: WebWorkerMLCEngine | null = null;
-let chatGeneration = 0;
-const chatCancellations = new Set<(error: Error) => void>();
-function cancellableChat<T>(task: Promise<T>): Promise<T> {
-  return new Promise((resolve, reject) => {
-    chatCancellations.add(reject);
-    task.then(resolve, reject).finally(() => chatCancellations.delete(reject));
-  });
-}
+import { EMBEDDING_CACHE, MODEL_REVISION } from "./constants";
+import { cancelChat, prepareChatModel, removeChatModel } from "./chat-runtime";
+import { getActiveChatModel } from "./model-store";
+import { detectHardware, incompatibility } from "./hardware";
+import { CHAT_MODELS } from "./models";
+export { completion } from "./chat-runtime";
+let embeddingWorker: Worker | null = null;
 const pending = new Map<
   string,
   {
@@ -52,77 +46,28 @@ function embeddingRequest(
   });
 }
 export function cancelModel(id: "embeddings" | "chat") {
-  if (id === "embeddings") {
-    embeddingWorker?.terminate();
-    embeddingWorker = null;
-    for (const p of pending.values())
-      p.reject(new Error("Operación cancelada"));
-    pending.clear();
-  } else {
-    chatGeneration++;
-    chatWorker?.terminate();
-    chatWorker = null;
-    engine = null;
-    for (const reject of chatCancellations)
-      reject(new Error("Operación cancelada"));
-    chatCancellations.clear();
+  if (id === "chat") {
+    cancelChat();
+    return;
   }
+  embeddingWorker?.terminate();
+  embeddingWorker = null;
+  for (const p of pending.values()) p.reject(new Error("Operación cancelada"));
+  pending.clear();
 }
 export async function gpuAvailable() {
-  if (!("gpu" in navigator)) return false;
-  try {
-    const adapter = await (navigator as any).gpu.requestAdapter();
-    return (
-      !!adapter &&
-      adapter.features.has("shader-f16") &&
-      adapter.limits.maxStorageBufferBindingSize >= 128 * 1024 * 1024
-    );
-  } catch {
-    return false;
-  }
-}
-async function chatEngine(
-  allowNetwork = false,
-  onProgress?: (p: number) => void,
-) {
-  if (engine) return engine;
-  const generation = chatGeneration;
-  if (!(await gpuAvailable()))
-    throw new Error(
-      "El chat requiere WebGPU con shader-f16 y memoria suficiente. Puedes usar la búsqueda y los embeddings.",
-    );
-  const { CreateWebWorkerMLCEngine, prebuiltAppConfig } =
-    await import("@mlc-ai/web-llm");
-  const record = prebuiltAppConfig.model_list.find(
-    (m) => m.model_id === CHAT_MODEL,
-  );
-  if (!record) throw new Error("Modelo no compatible con esta versión.");
-  if (generation !== chatGeneration) throw new Error("Operación cancelada");
-  chatWorker = new Worker(new URL("./chat.worker.ts", import.meta.url), {
-    type: "module",
-  });
-  chatWorker.postMessage({ tanukoinNetwork: allowNetwork });
-  const loaded = await cancellableChat(
-    CreateWebWorkerMLCEngine(
-      chatWorker,
-      CHAT_MODEL,
-      {
-        appConfig: { model_list: [record], cacheBackend: "cache" },
-        initProgressCallback: (p) => onProgress?.(p.progress),
-      },
-      { context_window_size: 4096 },
-    ),
-  );
-  if (generation !== chatGeneration) throw new Error("Operación cancelada");
-  engine = loaded;
-  chatWorker.postMessage({ tanukoinNetwork: false });
-  return engine;
+  return !incompatibility(CHAT_MODELS[1], await detectHardware());
 }
 export async function prepareModel(
   id: "embeddings" | "chat",
   download = false,
   progress?: (p: number) => void,
 ) {
+  if (id === "chat") {
+    const model = await getActiveChatModel();
+    if (!model) throw new Error("Elige un modelo vigente en IA local.");
+    return prepareChatModel(model.key, download, progress);
+  }
   await db.models.put({
     id,
     ready: false,
@@ -130,15 +75,9 @@ export async function prepareModel(
     savedAt: new Date().toISOString(),
   });
   cancelModel(id);
-  if (id === "embeddings") {
-    await embeddingRequest("init", undefined, download, progress);
-    cancelModel(id);
-    await embeddingRequest("init");
-  } else {
-    await chatEngine(download, progress);
-    cancelModel(id);
-    await chatEngine(false);
-  }
+  await embeddingRequest("init", undefined, download, progress);
+  cancelModel(id);
+  await embeddingRequest("init");
   await db.models.put({
     id,
     ready: true,
@@ -147,14 +86,17 @@ export async function prepareModel(
   });
 }
 export async function removeModel(id: "embeddings" | "chat") {
-  cancelModel(id);
-  if (id === "embeddings") {
-    await caches.delete(EMBEDDING_CACHE);
-    await db.embeddings.clear();
-  } else {
-    const { deleteModelAllInfoInCache } = await import("@mlc-ai/web-llm");
-    await deleteModelAllInfoInCache(CHAT_MODEL);
+  if (id === "chat") {
+    const model = await getActiveChatModel();
+    if (!model)
+      throw new Error(
+        "Selecciona el modelo que quieres desinstalar en IA local.",
+      );
+    return removeChatModel(model.key);
   }
+  cancelModel(id);
+  await caches.delete(EMBEDDING_CACHE);
+  await db.embeddings.clear();
   await db.models.delete(id);
 }
 export async function embed(texts: string[]): Promise<number[][]> {
@@ -265,22 +207,4 @@ export async function semanticSearch(query: string, movements: Movement[]) {
     .filter((r) => r.score >= 0.35)
     .sort((a, b) => b.score - a.score)
     .slice(0, 100);
-}
-export async function completion(system: string, prompt: string, json = false) {
-  if (!(await db.models.get("chat"))?.ready)
-    throw new Error("Descarga y comprueba el modelo de chat en IA local.");
-  const chat = await chatEngine();
-  const response = await cancellableChat(
-    chat.chat.completions.create({
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: prompt },
-      ],
-      temperature: 0,
-      max_tokens: 600,
-      extra_body: { enable_thinking: false },
-      ...(json ? { response_format: { type: "json_object" as const } } : {}),
-    }),
-  );
-  return response.choices[0]?.message.content || "";
 }

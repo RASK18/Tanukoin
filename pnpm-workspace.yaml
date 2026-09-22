@@ -1,3 +1,7 @@
+overrides:
+  # Variante oficial sin el módulo nativo bloqueado por Control de aplicaciones de Windows.
+  rollup: npm:@rollup/wasm-node@4.63.4
+
 allowBuilds:
   esbuild: true
   sharp: true

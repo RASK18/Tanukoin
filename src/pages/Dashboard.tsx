@@ -1,3 +1,4 @@
+import { getActiveChatModel } from "../features/ai/model-store";
 import { useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "../data/db";
@@ -43,7 +44,7 @@ export function Dashboard({ onImport }: { onImport: () => void }) {
   const { data, run } = useApp();
   const settings = data.settings[0];
   const chatReady = useLiveQuery(
-    async () => !!(await db.models.get("chat"))?.ready,
+    async () => !!(await getActiveChatModel()),
     [],
   );
   const showImport =

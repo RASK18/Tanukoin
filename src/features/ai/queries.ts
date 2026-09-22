@@ -7,6 +7,39 @@ import {
   parseDate,
 } from "../../lib/finance";
 import { locationCandidates } from "../locations/parse";
+
+const keywords = [
+  ["nomina", "nominas", "salario", "salarios", "sueldo", "sueldos", "haberes"],
+  ["factura", "facturas", "recibo", "recibos"],
+  [
+    "supermercado",
+    "supermercados",
+    "super",
+    "mercadona",
+    "carrefour",
+    "lidl",
+    "aldi",
+    "eroski",
+    "alcampo",
+    "consum",
+  ],
+  ["alquiler", "alquileres", "arrendamiento", "arrendamientos", "renta vivienda"],
+];
+function matchesKeyword(query: string, movement: Movement, data: Snapshot) {
+  const category = data.categories.find((c) => c.id === movement.categoryId);
+  const parent = data.categories.find((c) => c.id === category?.parentId);
+  const text = ` ${normalize([movement.description, movement.merchant, movement.notes, category?.name, parent?.name].filter(Boolean).join(" ")).replace(/[^a-z0-9]+/g, " ")} `;
+  const term = normalize(query).trim();
+  const aliases = keywords.find(
+    (group) =>
+      group.includes(term) &&
+      (group[0] !== "supermercado" ||
+        ["supermercado", "supermercados", "super"].includes(term)),
+  );
+  return aliases
+    ? aliases.some((word) => text.includes(` ${word} `))
+    : text.includes(term.replace(/[^a-z0-9]+/g, " "));
+}
 export interface QuerySpec {
   op:
     | "search"
@@ -16,7 +49,10 @@ export interface QuerySpec {
     | "recurrences"
     | "locations"
     | "merchant"
-    | "clarify";
+    | "min"
+    | "max"
+    | "mean"
+    | "median";
   from?: string;
   to?: string;
   accountId?: string;
@@ -26,11 +62,28 @@ export interface QuerySpec {
   direction?: "expense" | "income" | "all";
   comparisonFrom?: string;
   comparisonTo?: string;
-  question?: string;
   publicName?: string;
   city?: string;
+
+  excludeText?: string;
+  minAmount?: string;
+  maxAmount?: string;
+  mode?: "plain" | "bounded" | "trimmed";
+  trimPercent?: string;
 }
-export function validateQuery(value: unknown, data: Snapshot): QuerySpec {
+export interface Clarification {
+  op: "clarify";
+  question: string;
+}
+export interface QueryResult {
+  text: string;
+  rows: Movement[];
+  filters: string;
+}
+export function validateQuery(
+  value: unknown,
+  data: Snapshot,
+): QuerySpec | Clarification {
   if (!value || typeof value !== "object" || Array.isArray(value))
     throw new Error(
       "Tanu no ha podido interpretar la consulta. Prueba indicando fechas y categoría.",
@@ -47,9 +100,13 @@ export function validateQuery(value: unknown, data: Snapshot): QuerySpec {
     "direction",
     "comparisonFrom",
     "comparisonTo",
-    "question",
     "publicName",
     "city",
+    "excludeText",
+    "minAmount",
+    "maxAmount",
+    "mode",
+    "trimPercent",
   ];
   if (
     Object.keys(q).some((k) => !keys.includes(k)) ||
@@ -61,7 +118,10 @@ export function validateQuery(value: unknown, data: Snapshot): QuerySpec {
       "recurrences",
       "locations",
       "merchant",
-      "clarify",
+      "min",
+      "max",
+      "mean",
+      "median",
     ].includes(q.op)
   )
     throw new Error("Consulta no permitida.");
@@ -87,7 +147,89 @@ export function validateQuery(value: unknown, data: Snapshot): QuerySpec {
     throw new Error("Moneda no válida.");
   if (q.direction && !["expense", "income", "all"].includes(q.direction))
     throw new Error("Tipo de movimiento inválido.");
-  if (["sum", "group", "compare"].includes(q.op) && (!q.from || !q.to))
+  if (q.mode && !["plain", "bounded", "trimmed"].includes(q.mode))
+    throw new Error("Tipo de estadística no válido.");
+  for (const key of ["minAmount", "maxAmount"] as const)
+    if (
+      q[key] !== undefined &&
+      (!/^\d+$/.test(q[key]!) || !Number.isSafeInteger(Number(q[key])))
+    )
+      throw new Error(
+        "Los límites deben ser importes positivos en unidades monetarias enteras.",
+      );
+  if (
+    q.minAmount !== undefined &&
+    q.maxAmount !== undefined &&
+    Number(q.minAmount) > Number(q.maxAmount)
+  )
+    throw new Error("El intervalo de importes está invertido.");
+  if (
+    q.trimPercent !== undefined &&
+    (!/^\d+(\.\d+)?$/.test(q.trimPercent) || Number(q.trimPercent) >= 50)
+  )
+    throw new Error(
+      "El porcentaje por extremo debe estar entre 0 y menos de 50.",
+    );
+  if (
+    (q.mode || q.trimPercent !== undefined) &&
+    !["mean", "median"].includes(q.op)
+  )
+    throw new Error("El recorte solo se aplica a medias y medianas.");
+  if (
+    q.mode === "bounded" &&
+    q.minAmount === undefined &&
+    q.maxAmount === undefined
+  )
+    return {
+      op: "clarify",
+      question:
+        "¿Entre qué importes quieres acotar la estadística? Por ejemplo, entre 20 y 100 €.",
+    };
+  if (q.mode === "trimmed" && q.trimPercent === undefined)
+    return {
+      op: "clarify",
+      question:
+        "¿Qué porcentaje quieres quitar de cada extremo? Por ejemplo, el 10 % menor y el 10 % mayor.",
+    };
+  if (q.trimPercent !== undefined && q.mode !== "trimmed")
+    throw new Error(
+      "Indica una estadística truncada para aplicar el porcentaje.",
+    );
+  if (q.comparisonFrom || q.comparisonTo) {
+    if (q.op !== "compare")
+      throw new Error(
+        "Los períodos de comparación requieren la operación compare.",
+      );
+  }
+  if (q.op === "recurrences" && q.categoryId)
+    return {
+      op: "clarify",
+      question:
+        "Las recurrencias no tienen categoría propia. ¿Quieres buscar los movimientos de esa categoría?",
+    };
+  if (
+    q.op === "merchant" &&
+    Object.keys(q).some((key) => !["op", "publicName", "city"].includes(key))
+  )
+    return {
+      op: "clarify",
+      question:
+        "La búsqueda pública admite solo nombre del comercio y localidad. ¿Qué nombre público y localidad quieres buscar?",
+    };
+  if (
+    ["min", "max", "mean", "median"].includes(q.op) &&
+    (!q.direction || q.direction === "all")
+  )
+    return {
+      op: "clarify",
+      question: "¿Quieres calcularlo sobre gastos o sobre ingresos?",
+    };
+  if (
+    ["sum", "group", "compare", "min", "max", "mean", "median"].includes(
+      q.op,
+    ) &&
+    (!q.from || !q.to)
+  )
     return {
       op: "clarify",
       question:
@@ -107,9 +249,12 @@ export function validateQuery(value: unknown, data: Snapshot): QuerySpec {
   return q;
 }
 export function executeQuery(
-  q: QuerySpec,
+  q: QuerySpec | Clarification,
   data: Snapshot,
 ): { text: string; rows: Movement[]; filters: string } {
+  if (q.op === "clarify")
+    return { text: q.question, rows: [] as Movement[], filters: "" };
+  const statistic = ["min", "max", "mean", "median"].includes(q.op);
   const categoryIds = new Set([
     q.categoryId,
     ...data.categories
@@ -127,16 +272,21 @@ export function executeQuery(
         (!q.accountId || m.accountId === q.accountId) &&
         (!q.categoryId || categoryIds.has(m.categoryId)) &&
         (!q.currency || m.currency === q.currency) &&
-        (!q.text ||
-          normalize(`${m.description} ${m.merchant} ${m.notes}`).includes(
-            normalize(q.text),
-          )) &&
+        (!q.text || matchesKeyword(q.text, m, data)) &&
+        (!q.excludeText || !matchesKeyword(q.excludeText, m, data)) &&
+        (q.minAmount === undefined ||
+          Math.abs(m.amount) >= Number(q.minAmount)) &&
+        (q.maxAmount === undefined ||
+          Math.abs(m.amount) <= Number(q.maxAmount)) &&
+        (!statistic || !m.isRefund) &&
         (q.direction !== "expense" || m.amount < 0 || m.isRefund) &&
         (q.direction !== "income" || (m.amount > 0 && !m.isRefund)),
     );
   let rows: Movement[] = select();
   const filters = [
-    q.from && q.to ? `${q.from} → ${q.to}` : "Todo el historial",
+    q.from || q.to
+      ? `${q.from || "Inicio"} → ${q.to || "Hoy y posteriores"}`
+      : "Todo el historial",
     q.accountId
       ? data.accounts.find((a) => a.id === q.accountId)?.name
       : "Todas las cuentas",
@@ -144,27 +294,42 @@ export function executeQuery(
       ? data.categories.find((c) => c.id === q.categoryId)?.name
       : "Todas las categorías",
     q.text && `Texto: ${q.text}`,
+    q.excludeText && `Excluir: ${q.excludeText}`,
+    q.minAmount !== undefined &&
+      `Importe absoluto mínimo: ${money(Number(q.minAmount), q.currency || rows[0]?.currency || "EUR")}`,
+    q.maxAmount !== undefined &&
+      `Importe absoluto máximo: ${money(Number(q.maxAmount), q.currency || rows[0]?.currency || "EUR")}`,
     q.direction && q.direction !== "all"
       ? q.direction === "expense"
-        ? "Gastos y devoluciones"
+        ? statistic
+          ? "Gastos individuales, sin transferencias ni devoluciones"
+          : "Gastos y devoluciones"
         : "Ingresos"
       : null,
     q.currency,
   ]
     .filter(Boolean)
     .join(" · ");
-  if (q.op === "clarify")
-    return {
-      text: q.question || "¿Puedes concretar tu pregunta?",
-      rows: [],
-      filters: "",
-    };
   if (q.op === "recurrences")
     return {
       text:
         data.recurrences
           .filter(
-            (r) => r.active && (!q.accountId || r.accountId === q.accountId),
+            (r) =>
+              r.active &&
+              (!q.accountId || r.accountId === q.accountId) &&
+              (!q.from || r.nextDate >= q.from) &&
+              (!q.to || r.nextDate <= q.to) &&
+              (!q.currency || r.currency === q.currency) &&
+              (!q.text || normalize(r.name).includes(normalize(q.text))) &&
+              (!q.excludeText ||
+                !normalize(r.name).includes(normalize(q.excludeText))) &&
+              (q.direction !== "expense" || r.amount < 0) &&
+              (q.direction !== "income" || r.amount > 0) &&
+              (q.minAmount === undefined ||
+                Math.abs(r.amount) >= Number(q.minAmount)) &&
+              (q.maxAmount === undefined ||
+                Math.abs(r.amount) <= Number(q.maxAmount)),
           )
           .map(
             (r) =>
@@ -214,6 +379,51 @@ export function executeQuery(
     };
   if (q.op === "search")
     return { text: `He encontrado ${rows.length} movimientos.`, rows, filters };
+  if (statistic) {
+    const selected: Movement[] = [];
+    const text = [...new Set(rows.map((m) => m.currency))]
+      .map((currency) => {
+        const sorted = rows
+          .filter((m) => m.currency === currency)
+          .sort(
+            (a, b) =>
+              Math.abs(a.amount) - Math.abs(b.amount) ||
+              a.date.localeCompare(b.date) ||
+              a.id.localeCompare(b.id),
+          );
+        const cut =
+          q.mode === "trimmed"
+            ? Math.floor((sorted.length * Number(q.trimPercent)) / 100)
+            : 0;
+        const sample = sorted.slice(cut, sorted.length - cut);
+        const values = sample.map((m) => Math.abs(m.amount));
+        const label = {
+          min: "Mínimo",
+          max: "Máximo",
+          mean: "Media",
+          median: "Mediana",
+        }[q.op as "min" | "max" | "mean" | "median"];
+        let value: number;
+        if (q.op === "min" || q.op === "max") {
+          value = q.op === "min" ? values[0] : values[values.length - 1];
+          const matches = sample.filter((m) => Math.abs(m.amount) === value);
+          selected.push(...matches);
+          return `${currency}: ${label} ${money(value, currency)}. ${matches.map((m) => `${m.date} · ${m.merchant || m.description}`).join("; ")} (${matches.length} coincidencias).`;
+        }
+        // BigInt keeps sums exact in minor units; round once, only for display.
+        const numerator =
+          q.op === "mean"
+            ? values.reduce((sum, n) => sum + BigInt(n), 0n)
+            : BigInt(values[Math.floor((values.length - 1) / 2)]) +
+              BigInt(values[Math.floor(values.length / 2)]);
+        const denominator = BigInt(q.op === "mean" ? values.length : 2);
+        value = Number((numerator * 2n + denominator) / (denominator * 2n));
+        selected.push(...sample);
+        return `${currency}: ${label}${q.mode === "bounded" ? " acotada" : q.mode === "trimmed" ? " truncada" : ""} ${money(value, currency)} por movimiento (${sample.length} movimientos).${q.mode === "trimmed" ? ` Retirados ${cut} de cada extremo (${q.trimPercent} % por extremo, redondeado hacia abajo).${q.op === "median" ? " La truncación simétrica conserva la mediana." : ""}` : ""} Redondeo a la unidad mínima de la moneda.`;
+      })
+      .join("\n");
+    return { text, rows: selected, filters };
+  }
   const currencies = [
     ...new Set([...rows, ...previous].map((m) => m.currency)),
   ];

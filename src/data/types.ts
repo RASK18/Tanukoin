@@ -126,10 +126,18 @@ export interface MerchantResult {
   source: string;
 }
 export interface ModelState {
-  id: "embeddings" | "chat";
+  id: string;
   ready: boolean;
   revision: string;
   savedAt: string;
+  modelKey?: string;
+  modelId?: string;
+  backend?: "wasm" | "webgpu";
+  name?: string;
+  preparing?: boolean;
+  error?: string;
+  checkedDevice?: string;
+  resources?: { cache?: string; model?: string; library?: string };
 }
 export interface Embedding {
   id: string;

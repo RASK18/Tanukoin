@@ -1705,41 +1705,48 @@ tbody tr:hover {
   grid-template-columns: 1fr 1fr;
   gap: 20px;
 }
-.ai-explainer {
+.chat-model-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 245px), 1fr));
+}
+.device-profile {
+  margin: 20px 0;
+}
+.device-profile h3 {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.device-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 145px), 1fr));
+  gap: 12px;
+  margin: 10px 0;
+}
+.device-profile-grid > div {
+  padding: 13px 15px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #f7f8f5;
+}
+.device-profile-grid dt {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+.device-profile-grid dd {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 35px;
-  background: #eff4e8;
-  border-color: #e3ead9;
+  gap: 5px;
+  margin: 8px 0 0;
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 600;
 }
-.ai-explainer > div {
-  max-width: 600px;
-}
-.ai-explainer h2 {
-  font-size: 27px;
-  color: #4c6b3e;
-  font-weight: 550;
-  line-height: 1.3;
-  margin: 15px 0;
-  letter-spacing: -0.6px;
-}
-.ai-explainer p {
-  font-size: 13px;
-  color: #8a9b7a;
-  margin: 12px 0 20px;
-}
-.ai-explainer > img {
-  width: 190px;
-  height: 190px;
-  object-fit: contain;
-}
-.privacy-pill {
-  font-size: 11px;
-  color: #81936f;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
+.device-profile > p {
+  font-size: 12px;
+  line-height: 1.6;
 }
 .model-status {
   display: flex;
@@ -2626,32 +2633,6 @@ tbody tr:hover {
     font-size: 11px;
     align-items: flex-start;
     line-height: 1.5;
-  }
-  .ai-explainer {
-    padding: 24px 20px;
-    position: relative;
-    overflow: hidden;
-  }
-  .ai-explainer > img {
-    position: absolute;
-    right: -20px;
-    bottom: 0;
-    width: 120px;
-    height: 145px;
-    opacity: 0.65;
-  }
-  .ai-explainer > div {
-    z-index: 1;
-  }
-  .ai-explainer h2 {
-    font-size: 23px;
-  }
-  .ai-explainer p {
-    max-width: 250px;
-  }
-  .privacy-pill {
-    font-size: 9px;
-    max-width: 230px;
   }
   .model-card h2 {
     font-size: 19px;

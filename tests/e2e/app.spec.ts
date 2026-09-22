@@ -453,9 +453,14 @@ test("móvil: navegación, Tanu y ausencia de desbordamiento", async ({
   ).toBeVisible();
   await page.getByRole("button", { name: "Hablar con Tanu" }).click();
   await expect(
-    page.getByRole("link", { name: /Preparar a Tanu/ }),
+    page
+      .getByLabel("Chat de Tanu", { exact: true })
+      .getByRole("link", { name: "IA local", exact: true }),
   ).toBeVisible();
-  await expect(page.getByLabel("Pregunta a Tanu")).toBeDisabled();
+  await expect(page.getByLabel("Pregunta a Tanu")).toHaveCount(0);
+  await expect(page.getByLabel("Chat de Tanu", { exact: true })).toContainText(
+    "Para hablar conmigo, descarga un modelo",
+  );
   await page.screenshot({
     path: "artifacts/tanukoin-mobile.png",
     fullPage: true,

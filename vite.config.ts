@@ -96,7 +96,19 @@ export default defineConfig({
   ],
   define: { __APP_VERSION__: JSON.stringify(version) },
   worker: { format: "es" },
-  build: { chunkSizeWarningLimit: 2000 },
+  build: {
+    chunkSizeWarningLimit: 2000,
+    ...(process.env.TANUKOIN_AI_EVAL === "1"
+      ? {
+          rollupOptions: {
+            input: {
+              app: "index.html",
+              evaluation: "tests/browser/ai-harness.html",
+            },
+          },
+        }
+      : {}),
+  },
   test: {
     include: ["tests/**/*.test.ts"],
     environment: "node",
