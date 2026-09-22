@@ -1,6 +1,6 @@
 import type { WebWorkerMLCEngine } from "@mlc-ai/web-llm";
 import { db } from "../../data/db";
-import { modelByKey, modelCache, type ChatModel } from "./models";
+import { modelByKey, type ChatModel } from "./models";
 import {
   getActiveChatModel,
   gpuModelRecord,
@@ -23,14 +23,6 @@ let worker: Worker | undefined,
 let epoch = 0;
 let sequence: Promise<unknown> = Promise.resolve();
 const cancellations = new Set<(error: Error) => void>();
-const pending = new Map<
-  string,
-  {
-    resolve: (value: any) => void;
-    reject: (error: Error) => void;
-    progress?: (p: number) => void;
-  }
->();
 function cancellable<T>(promise: Promise<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     cancellations.add(reject);
@@ -58,23 +50,10 @@ function dispose() {
   const error = new Error("Operación cancelada");
   for (const reject of cancellations) reject(error);
   cancellations.clear();
-  for (const p of pending.values()) p.reject(error);
-  pending.clear();
 }
 export function cancelChat() {
   epoch++;
   dispose();
-}
-function cpuRequest(
-  type: string,
-  payload: object,
-  progress?: (p: number) => void,
-) {
-  const id = crypto.randomUUID();
-  return new Promise<any>((resolve, reject) => {
-    pending.set(id, { resolve, reject, progress });
-    worker!.postMessage({ id, type, ...payload });
-  });
 }
 async function load(
   model: ChatModel,
@@ -88,55 +67,32 @@ async function load(
   const reason = incompatibility(model, hardware);
   if (reason) throw new Error(reason);
   if (ticket !== epoch) throw new Error("Operación cancelada");
-  if (model.backend === "wasm") {
-    worker = new Worker(new URL("./cpu-chat.worker.ts", import.meta.url), {
-      type: "module",
-    });
-    worker.onmessage = (event) => {
-      const p = pending.get(event.data.id);
-      if (!p) return;
-      if (event.data.progress !== undefined) p.progress?.(event.data.progress);
-      else {
-        pending.delete(event.data.id);
-        if (event.data.error) p.reject(new Error(event.data.error));
-        else p.resolve(event.data.result);
-      }
-    };
-    worker.onerror = (event) => {
-      const error = new Error(event.message || "El motor CPU ha fallado.");
-      for (const p of pending.values()) p.reject(error);
-      pending.clear();
-      dispose();
-    };
-    await cpuRequest("load", { model, network }, progress);
-  } else {
-    const { CreateWebWorkerMLCEngine } = await import("@mlc-ai/web-llm");
-    const record = await gpuModelRecord(model);
-    if (
-      record.buffer_size_required_bytes &&
-      hardware.maxBinding < record.buffer_size_required_bytes
-    )
-      throw new Error(
-        "La GPU no admite el tamaño de búfer requerido por este modelo.",
-      );
-    if (ticket !== epoch) throw new Error("Operación cancelada");
-    worker = new Worker(new URL("./chat.worker.ts", import.meta.url), {
-      type: "module",
-    });
-    worker.postMessage({ tanukoinNetwork: network });
-    gpu = await cancellable(
-      CreateWebWorkerMLCEngine(
-        worker,
-        model.modelId,
-        {
-          appConfig: { model_list: [record], cacheBackend: "cache" },
-          initProgressCallback: (p) => progress?.(p.progress),
-        },
-        { context_window_size: model.contextSize },
-      ),
+  const { CreateWebWorkerMLCEngine } = await import("@mlc-ai/web-llm");
+  const record = await gpuModelRecord(model);
+  if (
+    record.buffer_size_required_bytes &&
+    hardware.maxBinding < record.buffer_size_required_bytes
+  )
+    throw new Error(
+      "La GPU no admite el tamaño de búfer requerido por este modelo.",
     );
-    worker.postMessage({ tanukoinNetwork: false });
-  }
+  if (ticket !== epoch) throw new Error("Operación cancelada");
+  worker = new Worker(new URL("./chat.worker.ts", import.meta.url), {
+    type: "module",
+  });
+  worker.postMessage({ tanukoinNetwork: network });
+  gpu = await cancellable(
+    CreateWebWorkerMLCEngine(
+      worker,
+      model.modelId,
+      {
+        appConfig: { model_list: [record], cacheBackend: "cache" },
+        initProgressCallback: (p) => progress?.(p.progress),
+      },
+      { context_window_size: model.contextSize },
+    ),
+  );
+  worker.postMessage({ tanukoinNetwork: false });
   if (ticket !== epoch) throw new Error("Operación cancelada");
   loaded = model.key;
 }
@@ -147,29 +103,9 @@ async function generate(
 ): Promise<Generation> {
   const maxTokens = options.maxTokens ?? 600;
   const request = messages.map((m) => ({ ...m }));
-  if (options.schema) {
-    const contract = `Devuelve solo JSON válido según este esquema: ${options.schema}`;
-    if (model.backend === "wasm") {
-      // The small CPU model can echo JSON Schema instead of producing an instance.
-      // Prompts describe field meanings; the coordinator validates the generated object.
-      const schema = JSON.parse(options.schema);
-      const variants = schema.oneOf || [schema];
-      const fields = [
-        ...new Set(
-          variants.flatMap((variant: { properties?: object }) =>
-            Object.keys(variant.properties || {}),
-          ),
-        ),
-      ];
-      request[0].content += `\nResponde únicamente con el objeto JSON solicitado, compacto y sin comentarios. No devuelvas un esquema. ${fields.length ? `Campos permitidos: ${fields.join(", ")}.` : ""}`;
-    } else request[0].content += `\n${contract}`;
-  }
+  if (options.schema)
+    request[0].content += `\nDevuelve solo JSON válido según este esquema: ${options.schema}`;
   const fitted = fitMessages(request, maxTokens, model.contextSize);
-  if (model.backend === "wasm")
-    return cpuRequest("generate", {
-      messages: fitted,
-      options: { ...options, maxTokens },
-    });
   const start = performance.now();
   // A fresh request contains the complete bounded context; WebLLM must not accumulate hidden history.
   await cancellable(gpu!.resetChat());
@@ -246,20 +182,19 @@ export function prepareChatModel(
     await reconcileChatModels();
     if (ticket !== epoch) throw new Error("Operación cancelada");
     const previous = await db.models.get(key);
-    const record =
-      model.backend === "webgpu" ? await gpuModelRecord(model) : undefined;
+    const record = await gpuModelRecord(model);
     const state = {
       id: key,
       modelKey: key,
       modelId: model.modelId,
       backend: model.backend,
+      engine: model.engine,
+      quantization: model.dtype,
       name: model.name,
       revision: model.revision,
       savedAt: new Date().toISOString(),
       ready: false,
-      resources: record
-        ? { model: record.model, library: record.model_lib }
-        : { cache: modelCache(model) },
+      resources: { model: record.model, library: record.model_lib },
     };
     await db.models.put({
       ...state,

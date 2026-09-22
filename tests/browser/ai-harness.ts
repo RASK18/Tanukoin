@@ -3,6 +3,7 @@ import {
   generateChat,
   cancelChat,
   removeChatModel,
+  completion,
 } from "../../src/features/ai/chat-runtime";
 import {
   askAssistant,
@@ -11,8 +12,11 @@ import {
 import { detectHardware } from "../../src/features/ai/hardware";
 import { chatFixture, chatScenarios } from "../ai-corpus";
 import { db } from "../../src/data/db";
+import {
+  detectionPrompt,
+  validateDetectedProfile,
+} from "../../src/features/import/detect";
 import type { Generation } from "../../src/features/ai/chat-types";
-
 export const harness = {
   prepare: prepareChatModel,
   generate: generateChat,
@@ -20,6 +24,21 @@ export const harness = {
   remove: removeChatModel,
   hardware: detectHardware,
   models: () => db.models.toArray(),
+  async importCheck() {
+    const rows = [
+      ["Día contable", "Detalle libre", "Total anotado", "Disponible"],
+      ["20/09/2026", "Compra ficticia", "-12,50", "987,50"],
+    ];
+    const response = await completion(
+      detectionPrompt,
+      JSON.stringify(rows),
+      true,
+    );
+    return {
+      response,
+      profile: validateDetectedProfile(JSON.parse(response), rows),
+    };
+  },
   scenarios: chatScenarios,
   async conversation(
     questions = [
@@ -105,6 +124,7 @@ export const harness = {
     let error: string | undefined;
     try {
       for (const question of scenario.questions) {
+        const started = performance.now();
         const reply = await askAssistant(
           question,
           state,
@@ -120,6 +140,7 @@ export const harness = {
         );
         state = reply.state;
         turns.push({
+          milliseconds: performance.now() - started,
           kind: reply.kind,
           text: reply.text,
           query: reply.query,

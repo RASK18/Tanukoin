@@ -84,6 +84,7 @@ const fields: Record<(typeof tables)[number], string[]> = {
     "timezone",
     "hideImportWelcome",
     "hideTanuWelcome",
+    "cpuThreads",
   ],
 };
 const required: Record<(typeof tables)[number], Record<string, string>> = {
@@ -322,6 +323,14 @@ export function validateBackup(input: unknown): Snapshot {
     movementIds = new Set(s.movements.map((m) => m.id)),
     locationIds = new Set(s.locations.map((l) => l.id));
   for (const setting of s.settings) {
+    if (
+      setting.cpuThreads !== undefined &&
+      setting.cpuThreads !== "auto" &&
+      (!Number.isInteger(setting.cpuThreads) ||
+        setting.cpuThreads < 1 ||
+        setting.cpuThreads > 8)
+    )
+      throw new Error("Ajuste de hilos CPU no válido");
     for (const key of ["hideImportWelcome", "hideTanuWelcome"] as const) {
       if (setting[key] !== undefined && typeof setting[key] !== "boolean")
         throw new Error("Preferencia de bienvenida no válida");

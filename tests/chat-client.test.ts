@@ -9,12 +9,13 @@ import {
 } from "../src/features/ai/chat-runtime";
 import {
   CHAT_MODELS,
+  RETIRED_CPU_MODELS,
   LEGACY_MODEL_KEY,
   activeChatModel,
-  modelCache,
 } from "../src/features/ai/models";
 import { reconcileChatModels } from "../src/features/ai/model-store";
 import {
+  detectHardware,
   recommendModel,
   incompatibility,
   type Hardware,
@@ -44,6 +45,8 @@ vi.mock("@mlc-ai/web-llm", () => ({
       "Qwen3-4B-q4f16_1-MLC",
       "Qwen3-8B-q4f16_1-MLC",
       "Qwen3.5-4B-q4f16_1-MLC",
+      "Qwen3.5-2B-q4f16_1-MLC",
+      "Qwen3.5-9B-q4f16_1-MLC",
     ].map((model_id) => ({
       model_id,
       model: `https://example.test/${model_id}`,
@@ -140,12 +143,27 @@ it("activa solo tras reiniciar y verificar generación offline", async () => {
   expect((await db.models.get(balanced.key))?.ready).toBe(true);
   expect(load.mock.calls[0][3]).toEqual({ context_window_size: 4096 });
 });
+it("bloquea preparar y generar con CPU 0.8B/2B/4B retirados sin retirar sus variantes GPU", async () => {
+  for (const model of RETIRED_CPU_MODELS) {
+    const retired = {
+      ...state(),
+      id: model.key,
+      modelKey: model.key,
+      revision: model.revision,
+    };
+    await db.models.bulkPut([retired, { ...retired, id: "chat" }]);
+    await expect(prepareChatModel(model.key)).rejects.toThrow("retirado");
+    await expect(completion("s", "q")).rejects.toThrow("vigente");
+    await reconcileChatModels();
+    expect((await db.models.get(balanced.key))?.ready).toBe(true);
+  }
+  expect(load).not.toHaveBeenCalled();
+  expect(create).not.toHaveBeenCalled();
+});
 it("la prueba Qwen3.5 conserva los modelos descargados y el muestreo se limita a conversación", async () => {
-  await prepareChatModel("chat:balanced-trial", true);
+  await prepareChatModel("chat:gpu-2b", true);
   expect((await db.models.get(balanced.key))?.ready).toBe(true);
-  expect(activeChatModel(await db.models.toArray())?.key).toBe(
-    "chat:balanced-trial",
-  );
+  expect(activeChatModel(await db.models.toArray())?.key).toBe("chat:gpu-2b");
   await generateChat([{ role: "user", content: "Hola" }], {
     temperature: 0.7,
     topP: 0.8,
@@ -207,9 +225,15 @@ it("desinstala solo recursos de la variante elegida", async () => {
       delete: fileDelete,
     }),
   });
-  await db.models.put(state(CHAT_MODELS[0]));
-  await removeChatModel(CHAT_MODELS[0].key);
-  expect(cacheDelete).toHaveBeenCalledWith(modelCache(CHAT_MODELS[0]));
+  await db.models.put({
+    ...state(),
+    id: "chat:light",
+    modelKey: "chat:light",
+    backend: "wasm",
+    resources: { cache: "tanukoin-chat-light-old" },
+  });
+  await removeChatModel("chat:light");
+  expect(cacheDelete).toHaveBeenCalledWith("tanukoin-chat-light-old");
   expect((await db.models.get(balanced.key))?.ready).toBe(true);
   expect(deleteModel).not.toHaveBeenCalled();
   await db.models.put({
@@ -275,56 +299,89 @@ it("cancelar durante la carga conserva la instalación y permite reintentarlo", 
   expect(activeChatModel(await db.models.toArray())?.key).toBe(balanced.key);
   expect(await completion("s", "q", true)).toBe('{"ready":true}');
 });
-it("recomienda según compatibilidad y RAM, avanzado solo tras comprobar esa GPU", () => {
+it("recomienda sin inferir VRAM de RAM y nunca recomienda 9B automáticamente", () => {
   expect(recommendModel({ ...hardware, gpu: false }, []).key).toBe(
-    "chat:light",
+    "chat:gpu-2b",
   );
-  expect(recommendModel({ ...hardware, f16: false }, []).key).toBe(
-    "chat:light",
+  expect(recommendModel({ ...hardware, ramGB: 128 }, []).key).toBe(
+    "chat:gpu-2b",
   );
-  expect(recommendModel({ ...hardware, ramGB: undefined }, []).key).toBe(
-    "chat:light",
-  );
-  expect(recommendModel(hardware, []).key).toBe("chat:balanced");
-  expect(recommendModel({ ...hardware, cpuThreads: 2 }, []).key).toBe(
-    "chat:light",
-  );
-  expect(
-    recommendModel({ ...hardware, cpuThreads: 6, deviceType: "desktop" }, [])
-      .key,
-  ).toBe("chat:balanced");
-  expect(
-    recommendModel({ ...hardware, cpuThreads: 8, deviceType: "mobile" }, [])
-      .key,
-  ).toBe("chat:light");
-  expect(recommendModel({ ...hardware, ramGB: 4 }, []).key).toBe("chat:light");
-  // Profile recommendations never prevent a manual choice of compatible GPU models.
-  expect(
-    incompatibility(balanced, {
-      ...hardware,
-      cpuThreads: 2,
-      deviceType: "mobile",
-    }),
-  ).toBeUndefined();
   expect(
     recommendModel(hardware, [
       { ...state(advanced), checkedDevice: hardware.device },
     ]).key,
-  ).toBe("chat:advanced");
+  ).toBe("chat:gpu-2b");
   expect(
-    recommendModel(hardware, [{ ...state(advanced), checkedDevice: "otra" }])
+    recommendModel(hardware, [
+      { ...state(balanced), checkedDevice: hardware.device },
+    ]).key,
+  ).toBe("chat:gpu-4b");
+  expect(
+    recommendModel(hardware, [{ ...state(balanced), checkedDevice: "otra" }])
       .key,
-  ).toBe("chat:balanced");
+  ).toBe("chat:gpu-2b");
   expect(
-    incompatibility(advanced, { ...hardware, maxBinding: 100 }),
-  ).toBeTruthy();
-  const limited = { ...hardware, maxBinding: 256 * 1024 * 1024 };
-  expect(incompatibility(balanced, limited)).toBeUndefined();
-  expect(incompatibility(advanced, limited)).toBeTruthy();
-  expect(
-    recommendModel({ ...hardware, maxBinding: 128 * 1024 * 1024 }, []).key,
-  ).toBe("chat:light");
-  expect(
-    incompatibility(CHAT_MODELS[0], { ...hardware, gpu: false, f16: false }),
+    incompatibility(CHAT_MODELS[0], {
+      ...hardware,
+      maxBinding: 256 * 1024 * 1024,
+    }),
   ).toBeUndefined();
+  expect(
+    incompatibility(balanced, { ...hardware, maxBinding: 256 * 1024 * 1024 }),
+  ).toBeTruthy();
 });
+it("promueve 4B GPU conservando selección, revisión y recursos probados", async () => {
+  const old = {
+    ...state(balanced),
+    id: "chat:balanced-trial",
+    modelKey: "chat:balanced-trial",
+    resources: { model: "https://example.test/pinned/", library: "same.wasm" },
+  };
+  await db.models.clear();
+  await db.models.bulkPut([old, { ...old, id: "chat" }]);
+  await reconcileChatModels();
+  expect(activeChatModel(await db.models.toArray())?.key).toBe(balanced.key);
+  expect((await db.models.get(balanced.key))?.resources).toEqual(old.resources);
+  expect(await db.models.get(old.id)).toBeUndefined();
+});
+it("una revisión distinta de la prueba se conserva retirada sin activarse", async () => {
+  const old = {
+    ...state(balanced),
+    id: "chat:balanced-trial",
+    modelKey: "chat:balanced-trial",
+    revision: "otra",
+  };
+  await db.models.clear();
+  await db.models.bulkPut([old, { ...old, id: "chat" }]);
+  await reconcileChatModels();
+  expect(activeChatModel(await db.models.toArray())).toBeUndefined();
+  expect(await db.models.get(old.id)).toMatchObject({
+    ready: false,
+    revision: "otra",
+  });
+});
+
+it.each(["absent", "null", "blocked"])(
+  "detecta WebGPU %s sin activar ni descargar",
+  async (mode) => {
+    vi.stubGlobal("navigator", {
+      gpu:
+        mode === "absent"
+          ? undefined
+          : {
+              requestAdapter: async () => {
+                if (mode === "blocked") throw new Error("Bloqueado");
+                return null;
+              },
+            },
+    });
+    const detected = await detectHardware();
+    expect(detected.gpu).toBe(false);
+    expect(incompatibility(CHAT_MODELS[0], detected)).toContain("WebGPU");
+    await expect(prepareChatModel(CHAT_MODELS[0].key, true)).rejects.toThrow(
+      "WebGPU",
+    );
+    expect(load).not.toHaveBeenCalled();
+    expect(deleteModel).not.toHaveBeenCalled();
+  },
+);

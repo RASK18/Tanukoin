@@ -1,13 +1,6 @@
 import { useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import {
-  Download,
-  Sparkles,
-  Check,
-  Trash2,
-  Cpu,
-  X,
-} from "lucide-react";
+import { Download, Sparkles, Check, Trash2, Cpu, X } from "lucide-react";
 import { db } from "../data/db";
 import { useApp, PageTitle } from "../components/ui";
 import {

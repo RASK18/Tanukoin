@@ -6,11 +6,93 @@ import {
   modelByKey,
   modelCache,
   RETIRED_CHAT_MODEL,
+  RETIRED_CPU_MODELS,
   type ChatModel,
 } from "./models";
 
 export async function reconcileChatModels() {
   await db.transaction("rw", db.models, async () => {
+    const retired = [
+      {
+        key: "chat:light",
+        modelId: "onnx-community/Qwen3-1.7B-ONNX",
+        backend: "wasm" as const,
+        name: "Qwen3 1.7B CPU",
+      },
+      {
+        key: "chat:balanced",
+        modelId: "Qwen3-4B-q4f16_1-MLC",
+        backend: "webgpu" as const,
+        name: "Qwen3 4B GPU",
+      },
+      {
+        key: "chat:advanced",
+        modelId: "Qwen3-8B-q4f16_1-MLC",
+        backend: "webgpu" as const,
+        name: "Qwen3 8B GPU",
+      },
+    ];
+    for (const state of await db.models.toArray()) {
+      const retiredCpu = RETIRED_CPU_MODELS.find(
+        (model) =>
+          model.key === (state.id === "chat" ? state.modelKey : state.id),
+      );
+      if (retiredCpu)
+        await db.models.update(state.id, {
+          modelId: retiredCpu.modelId,
+          name: retiredCpu.name,
+          backend: retiredCpu.backend,
+          engine: retiredCpu.engine,
+          quantization: retiredCpu.dtype,
+          resources: state.resources || {
+            gguf: retiredCpu.ggufUrl!.replace(
+              `/resolve/${retiredCpu.revision}/`,
+              `/resolve/${state.revision}/`,
+            ),
+          },
+        });
+      const old = retired.find(
+        (model) =>
+          model.key === (state.id === "chat" ? state.modelKey : state.id),
+      );
+      if (old)
+        await db.models.update(state.id, {
+          modelId: state.modelId || old.modelId,
+          backend: state.backend || old.backend,
+          name: old.name,
+          resources:
+            state.resources ||
+            (old.backend === "wasm"
+              ? {
+                  cache: `tanukoin-${old.key.replace(":", "-")}-${state.revision}`,
+                }
+              : {
+                  model: `https://huggingface.co/mlc-ai/${old.modelId}/resolve/${state.revision}/`,
+                }),
+        });
+    }
+    const promoted = modelByKey("chat:gpu-4b")!;
+    for (const id of ["chat:balanced-trial", "chat"]) {
+      const old = await db.models.get(id);
+      if (
+        old &&
+        (id !== "chat" || old.modelKey === "chat:balanced-trial") &&
+        old.revision === promoted.revision &&
+        (!old.modelId || old.modelId === promoted.modelId)
+      ) {
+        const migrated = {
+          ...old,
+          id: id === "chat" ? id : promoted.key,
+          modelKey: promoted.key,
+          modelId: promoted.modelId,
+          name: promoted.name,
+          engine: promoted.engine,
+          quantization: promoted.dtype,
+        };
+        await db.models.put(migrated);
+        if (id !== "chat") await db.models.delete(id);
+      }
+    }
     const active = await db.models.get("chat");
     if (active && !modelByKey(active.modelKey)) {
       const key = active.modelKey || LEGACY_MODEL_KEY;
@@ -43,7 +125,16 @@ export async function reconcileChatModels() {
           resources:
             state.resources ||
             (current.backend === "wasm"
-              ? { cache: modelCache({ ...current, revision: state.revision }) }
+              ? current.ggufUrl
+                ? {
+                    gguf: current.ggufUrl.replace(
+                      `/resolve/${current.revision}/`,
+                      `/resolve/${state.revision}/`,
+                    ),
+                  }
+                : {
+                    cache: modelCache({ ...current, revision: state.revision }),
+                  }
               : undefined),
         });
         await db.models.delete(state.id);
@@ -81,12 +172,26 @@ export async function gpuModelRecord(model: ChatModel) {
   if (!original) throw new Error("Modelo no compatible con esta versión.");
   return {
     ...original,
+    overrides: {
+      ...original.overrides,
+      context_window_size: 4096,
+      max_history_size: 1,
+    },
     model: `https://huggingface.co/mlc-ai/${model.modelId}/resolve/${model.revision}/`,
   };
 }
 export async function uninstallChatFiles(state: ModelState) {
   const model = modelByKey(state.id);
-  if (model?.backend === "wasm" || state.backend === "wasm") {
+  if (state.resources?.gguf || model?.ggufUrl) {
+    const url = state.resources?.gguf || model!.ggufUrl!;
+    const shared = (await db.models.toArray()).some(
+      (s) => s.id !== state.id && s.id !== "chat" && s.resources?.gguf === url,
+    );
+    if (!shared) {
+      const { CacheManager } = await import("@wllama/wllama");
+      await new CacheManager().delete(url);
+    }
+  } else if (model?.backend === "wasm" || state.backend === "wasm") {
     const cache =
       state.resources?.cache ||
       (model && modelCache({ ...model, revision: state.revision }));
@@ -130,7 +235,10 @@ export async function uninstallChatFiles(state: ModelState) {
             ?.model_lib) === record.model_lib
       );
     });
-    const prefix = record.model.replace(/\/?$/, "/");
+    const prefix = (state.resources?.model || record.model).replace(
+      /\/?$/,
+      "/",
+    );
     const modelShared = otherStates.some(
       (s) => s.resources?.model?.replace(/\/?$/, "/") === prefix,
     );
@@ -162,6 +270,10 @@ export async function uninstallChatFiles(state: ModelState) {
 export async function cachedModelSize(
   state: ModelState,
 ): Promise<number | undefined> {
+  if (state.resources?.gguf) {
+    const { CacheManager } = await import("@wllama/wllama");
+    return (await new CacheManager().open(state.resources.gguf))?.size;
+  }
   if (typeof caches === "undefined") return;
   const model = modelByKey(state.id);
   const id = model?.modelId || state.modelId;
@@ -203,4 +315,31 @@ export async function cachedModelSize(
     }
   }
   return found && !unknown ? bytes : undefined;
+}
+
+// Metadata only: retired CPU weights may be uninstalled, never loaded for inference.
+export async function discoverCpuDownloads() {
+  if (!navigator.storage?.getDirectory) return;
+  const { CacheManager } = await import("@wllama/wllama");
+  const cache = new CacheManager();
+  for (const model of RETIRED_CPU_MODELS) {
+    if ((await cache.open(model.ggufUrl!))?.size !== model.downloadBytes)
+      continue;
+    await db.transaction("rw", db.models, async () => {
+      if (await db.models.get(model.key)) return;
+      await db.models.put({
+        id: model.key,
+        modelKey: model.key,
+        modelId: model.modelId,
+        name: model.name,
+        backend: model.backend,
+        engine: model.engine,
+        quantization: model.dtype,
+        revision: model.revision,
+        savedAt: new Date().toISOString(),
+        ready: false,
+        resources: { gguf: model.ggufUrl },
+      });
+    });
+  }
 }

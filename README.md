@@ -13,7 +13,7 @@ Finanzas personales en español, en tu navegador. PWA estática sin backend, ana
 - Reglas por prioridad que respetan categorías manuales, con revisión para aplicarlas al historial.
 - Resumen, gráficos y calendario semanal, mensual y anual. Monedas separadas, sin conversión automática.
 - Google Timeline: `semanticSegments`, `timelineObjects` y `Records.json`. Ubicaciones sugeridas o confirmadas y corrección manual.
-- Embeddings locales para categorizar y buscar por similitud. Tanu ofrece ayuda sobre la web, conversación básica, búsquedas y estadísticas mediante un modelo local preparado (CPU o WebGPU). La aplicación valida las consultas y calcula las cifras; el chat no modifica movimientos.
+- Embeddings locales para categorizar y buscar por similitud. Tanu ofrece ayuda sobre la web, conversación básica, búsquedas y estadísticas mediante un modelo local preparado (WebGPU). La aplicación valida las consultas y calcula las cifras; el chat no modifica movimientos.
 - Enable Banking mediante una extensión opcional Manifest V3 para Chrome/Edge de escritorio.
 - Copias completas JSON y exportación de movimientos CSV.
 
@@ -57,37 +57,48 @@ La evaluación real del chat se compila como una entrada separada, excluida de l
 $env:TANUKOIN_AI_EVAL = '1'
 pnpm build
 $env:TEST_BROWSER_CHANNEL = 'msedge'
-$env:TEST_CHAT_VARIANT = 'balanced' # light, balanced o advanced
+$env:TEST_CHAT_VARIANT = 'gpu-4b' # gpu-2b o gpu-4b
 pnpm test:e2e tests/e2e/local-chat.spec.ts
 Remove-Item Env:TANUKOIN_AI_EVAL, Env:TEST_BROWSER_CHANNEL, Env:TEST_CHAT_VARIANT
 ```
 
-Cada variante usa un perfil aislado en `.cache/tanu-tests/`, conservando las descargas entre ejecuciones. Los informes contienen únicamente datos ficticios. CPU desactiva WebGPU; GPU exige carga real. Se ejecutan 50 escenarios dos veces, incluidos 20 reservados fuera de los ejemplos del prompt. Se exige que pasen todos los críticos y al menos el 95 % en cada vuelta. Las aclaraciones innecesarias cuentan como fallos. Avanzado añade presión de contexto y conversación prolongada; todos comprueban reinicio offline y recuperación tras cancelar. No ejecutes dos variantes GPU simultáneamente al medir memoria. Si ejecutas pruebas de CPU y GPU en paralelo, mantén un servidor independiente con `pnpm exec vite preview --host 127.0.0.1 --port 4173 --strictPort` para que una suite no cierre el servidor de la otra.
+Cada variante usa un perfil aislado en `.cache/tanu-tests/`, conservando las descargas entre ejecuciones. Los informes contienen únicamente datos ficticios. Se exige carga GPU real y se ejecutan 50 escenarios dos veces, incluidos 20 reservados fuera de los ejemplos del prompt. Deben pasar todos los críticos y al menos el 95 % en cada vuelta. Las aclaraciones innecesarias cuentan como fallos. La evaluación completa añade importación, presión de contexto y conversación prolongada, reinicio offline y recuperación tras cancelar. Ejecuta las variantes por separado para no competir por la GPU. 9B no se ejecuta en el equipo de referencia de 8 GB.
 
-Para diagnosticar un subconjunto, `TEST_CHAT_SMOKE=1` hace una sola vuelta y `TEST_CHAT_CASES='07,08'` selecciona casos. Una ejecución parcial **no acredita** la aceptación. `TEST_CHAT_CONTEXT=1` activa también el ensayo prolongado de Avanzado en modo diagnóstico. Los tests habituales no descargan modelos y mantienen Chromium por defecto.
+Para diagnosticar un subconjunto, `TEST_CHAT_SMOKE=1` hace una sola vuelta y `TEST_CHAT_CASES='07,08'` selecciona casos. Una ejecución parcial **no acredita** la aceptación. `TEST_CHAT_CONTEXT=1` activa también el ensayo prolongado en modo diagnóstico. Los tests habituales no descargan modelos y mantienen Chromium por defecto.
+
+`TEST_CHAT_LABEL` añade un sufijo al informe para no sobrescribir comparaciones anteriores. El informe incluye el tiempo completo de cada turno terminado; los errores se registran aparte y no cuentan como respuestas correctas. Al terminar, vuelve a compilar sin `TANUKOIN_AI_EVAL` para excluir el harness del producto. Los informes históricos de CPU se conservan, pero su motor y pruebas de ejecución se han retirado.
 
 ### Modelos de chat
 
-| Nivel | Modelo y motor | Descarga aproximada |
-| --- | --- | --- |
-| Ligero | Qwen3 1.7B ONNX q8, CPU/WebAssembly | 1,76 GB |
-| Equilibrado | Qwen3 4B MLC q4f16_1, WebGPU | 2,5 GB |
-| Avanzado | Qwen3 8B MLC q4f16_1, WebGPU, GPU de 8 GB | 4,8 GB |
-| Prueba temporal | Qwen3.5 4B MLC q4f16_1, WebGPU | 2,37 GB |
+#### Modelos de Tanu
 
-La opción **Qwen3.5 · prueba** permite comparar conversación y consumo con Avanzado. Tiene revisión y caché independientes y no sustituye ni activa automáticamente otro modelo. Su memoria gráfica estimada por WebLLM es de unos 3,9 GB; la cifra real y la fluidez dependen del equipo y los otros procesos. Se mantiene como experimento hasta completar la evaluación.
+| Perfil objetivo | Modelo y formato                      | Descarga de pesos |
+| --------------- | ------------------------------------- | ----------------- |
+| 4 GB de VRAM    | Qwen3.5 2B MLC q4f16_1                | 1,06 GB           |
+| 8 GB de VRAM    | Qwen3.5 4B MLC q4f16_1                | 2,37 GB           |
+| 12 GB de VRAM   | Qwen3.5 9B MLC q4f16_1 · Experimental | 5,04 GB           |
+
+WebLLM es el único motor conversacional. Todas las variantes usan contexto total 4096 y pensamiento desactivado. La tarjeta de 9B indica que está pendiente de pruebas reales en equipos de 12 GB de VRAM. Transformers.js mantiene los embeddings con su motor independiente.
+
+Tanu necesita WebGPU compatible, `shader-f16` y límites de búfer suficientes. Si la API no existe, devuelve un adaptador nulo o el navegador bloquea su acceso, se muestra un aviso y se impide descargar o activar los modelos. No se ofrece alternativa CPU. La comprobación no puede garantizar memoria libre ni identificar siempre la causa del bloqueo. El resto de Tanukoin sigue disponible.
+
+La PWA conserva un único service worker personalizado para precaché y COOP/COEP. No hay recarga automática ni control para habilitar hilos CPU. `pnpm dev` sirve cabeceras equivalentes; `pnpm preview` carece de ellas para comprobar el comportamiento de un servidor estático como GitHub Pages. El retorno bancario utiliza BroadcastChannel por autorización y valida el state, sin códigos persistidos ni dependencia de window.opener.
+
+La página temporal, el worker CPU y el selector de hilos se han retirado. Los modelos CPU instalados quedan en «Modelos retirados», sin posibilidad de activarlos ni generar. Sus archivos se conservan para desinstalarlos voluntariamente e instalar un modelo vigente. Las claves distinguen CPU y GPU: retirar o desinstalar 2B/4B CPU no afecta a 2B/4B GPU. Se mantiene únicamente CacheManager de wllama para detectar y desinstalar GGUF anteriores; no se distribuye su motor WASM. Los informes locales y preferencias antiguas se conservan.
 
 Las respuestas conversacionales se generan en un paso propio, con temperatura 0,7 y top-p 0,8; las decisiones y parámetros de consultas mantienen temperatura cero y validación estructurada. Se conserva el máximo de tres inferencias por turno.
 
 Tanu recibe la identidad y las funciones confirmadas de Tanukoin también al conversar, para no atribuirle funciones de criptomonedas o inversión. La respuesta normal se solicita en una a tres frases, hasta 60 palabras; solo se amplía, hasta 120, si se piden detalles. Son instrucciones al modelo: no se recorta el texto generado ni se cambia su temperatura.
 
-Para una comparación corta con datos ficticios, compila con `TANUKOIN_AI_EVAL=1` y ejecuta `tests/e2e/local-chat.spec.ts` con `TEST_BROWSER_CHANNEL=msedge`, `TEST_CHAT_VARIANT=balanced-trial` (o `advanced`), `TEST_CHAT_SMOKE=1`, `TEST_CHAT_COMPARE=1` y `TEST_CHAT_CASES=03,07,10,16,24,33,45,50`. Cada variante se ejecuta por separado, con límite de diez minutos en modo diagnóstico. Los informes `comparison-*.json` conservan cuatro turnos de conversación y, si está disponible `nvidia-smi`, muestras de VRAM y utilización **totales de la GPU**, incluyendo otros procesos. No acreditan la fluidez del escritorio ni la aceptación completa del modelo. Los informes históricos no se sobrescriben. Al terminar, vuelve a compilar sin `TANUKOIN_AI_EVAL` para usar la aplicación normal.
+Para una comparación corta con datos ficticios, compila con `TANUKOIN_AI_EVAL=1` y ejecuta `tests/e2e/local-chat.spec.ts` con `TEST_BROWSER_CHANNEL=msedge`, `TEST_CHAT_VARIANT=gpu-4b` (o `gpu-2b`), `TEST_CHAT_SMOKE=1`, `TEST_CHAT_COMPARE=1` y `TEST_CHAT_CASES=03,07,10,16,24,33,45,50`. Cada variante se ejecuta por separado, con límite de diez minutos en modo diagnóstico. Los informes `comparison-*.json` conservan cuatro turnos de conversación y, si está disponible `nvidia-smi`, muestras de VRAM y utilización **totales de la GPU**, incluyendo otros procesos. No acreditan la fluidez del escritorio ni la aceptación completa del modelo. Los informes históricos no se sobrescriben. Al terminar, vuelve a compilar sin `TANUKOIN_AI_EVAL` para usar la aplicación normal.
 
 Para la regresión breve de identidad, funciones y longitud, usa `TEST_CHAT_STYLE=1` en lugar de `TEST_CHAT_COMPARE`, junto con `TEST_CHAT_SMOKE=1` y `TEST_CHAT_CASES=03,07,24,33`. Guarda ocho respuestas de siete conversaciones ficticias en `style-<variante>.json`, comprueba sus límites de palabras y las afirmaciones sobre funciones inexistentes. Revisa también el contenido completo del informe: las comprobaciones de texto no garantizan exactitud semántica. Libera la GPU de otros modelos antes de ejecutar esta prueba.
 
-Las cifras de descarga no equivalen a RAM o VRAM necesaria. GPU requiere `shader-f16`; Avanzado limita el contexto completo a 4096 tokens. Solo se mantiene un modelo de chat cargado. IA local muestra un perfil orientativo con núcleos lógicos de CPU, RAM aproximada, disponibilidad de WebGPU y tipo de dispositivo. La recomendación usa ese perfil y los límites de WebGPU, sin consultar la cuota de almacenamiento, que algunos navegadores alteran por privacidad. En móvil/tableta o con menos de cuatro núcleos lógicos indicados se aconseja empezar con Ligero; con WebGPU compatible y al menos 8 GB de RAM se recomienda Equilibrado en los demás casos. Son recomendaciones, no bloqueos de elección. Los datos no disponibles no se inventan y la VRAM libre no se conoce con precisión. Avanzado solo se recomienda automáticamente tras una comprobación local satisfactoria. Cambiar de modelo requiere una acción del usuario y conserva las demás descargas.
+Las cifras de descarga no equivalen a RAM o VRAM necesaria. Los niveles GPU son perfiles objetivo, sin una reserva obligatoria de 3 GB. El navegador no permite deducir la VRAM a partir de RAM ni garantiza memoria libre suficiente. Se recomienda inicialmente 2B GPU, y 4B solo tras comprobarlo en esa GPU. La selección activa compatible se conserva aunque cambie la recomendación.
 
-El Qwen3 1.7B GPU antiguo queda retirado: no sirve para chat ni importación asistida. Se conserva su caché y se ofrece desinstalarlo individualmente. La variante CPU tiene revisión, caché y comprobación propias. El catálogo está en `src/features/ai/models.ts`.
+La opción CPU se ha retirado por los resultados de velocidad y calidad. Las pruebas reales también detectan fallos críticos de calidad en GPU 2B/4B; no se declara una variante validada sin superar la batería exigida. Véanse [resultados y limitaciones](docs/evaluacion-modelos.md).
+
+Qwen3 1.7B CPU, 4B GPU y 8B GPU se conservan en Modelos retirados hasta su desinstalación manual. La antigua prueba Qwen3.5 4B GPU se convierte en la variante de 8 GB cuando coincide su revisión, conservando selección y descarga. CPU y GPU tienen archivos independientes. El catálogo fija revisiones en `src/features/ai/models.ts`.
 
 ## Publicación y versiones
 
@@ -107,7 +118,7 @@ Cada persona necesita su propia aplicación, Application ID, PEM PKCS#8 y cuenta
 
 ## Offline y privacidad
 
-La aplicación prepara aproximadamente 90 MB sin comprimir de interfaz, lectores y motores; los modelos se descargan aparte, por decisión del usuario. Espera al indicador **Disponible sin conexión**. Importar archivos, editar, consultar, generar gráficos y consultar ubicaciones guardadas funciona offline. Cada modelo se marca preparado después de reiniciarlo y ejecutarlo sin permitir descargas externas.
+La aplicación prepara aproximadamente 100 MB sin comprimir de interfaz, lectores y motores; los modelos se descargan aparte, por decisión del usuario. Espera al indicador **Disponible sin conexión**. Importar archivos, editar, consultar, generar gráficos y consultar ubicaciones guardadas funciona offline. Cada modelo se marca preparado después de reiniciarlo y ejecutarlo sin permitir descargas externas.
 
 Mapas, búsqueda y banca empiezan desactivados. El callejero usa OpenStreetMap online sin descargas masivas. La búsqueda muestra el nombre público y localidad que enviará a Photon/Wikipedia. Los archivos, importes, conversaciones e historial completo no se envían a esos servicios. Descargar modelos contacta con Hugging Face y los recursos de WebLLM. No existe sustitución por IA remota.
 
@@ -117,7 +128,7 @@ Tanukoin no cifra los datos: quien acceda a tu perfil del navegador puede leerlo
 
 Las pruebas cubren cálculos, fechas, relaciones, reglas, recurrencias, consultas de Tanu, Timeline, copias y restricciones del puente. Playwright verifica los flujos principales, lectores, arranque offline y diseño móvil/escritorio. La prueba optativa usa embeddings reales y comprueba su caché offline.
 
-La autorización real bancaria requiere credenciales personales y pruebas con el sandbox o banco. Los modelos GPU necesitan WebGPU, `shader-f16` y memoria suficiente; Ligero utiliza CPU. La carga, el rendimiento y la calidad conversacional deben comprobarse por variante con modelos reales. Estas comprobaciones externas no quedan sustituidas por tests de lógica. No hay OCR: los PDF escaneados necesitan otro formato y los diseños complejos pueden necesitar correcciones. Las ubicaciones y categorías inferidas son propuestas revisables.
+La autorización real bancaria requiere credenciales personales y pruebas con el sandbox o banco. Los modelos GPU necesitan WebGPU, `shader-f16` y memoria suficiente. La carga, el rendimiento y la calidad conversacional deben comprobarse por variante con modelos reales. Estas comprobaciones externas no quedan sustituidas por tests de lógica. No hay OCR: los PDF escaneados necesitan otro formato y los diseños complejos pueden necesitar correcciones. Las ubicaciones y categorías inferidas son propuestas revisables.
 
 ## Código y atribuciones
 

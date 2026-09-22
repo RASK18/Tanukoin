@@ -3,6 +3,7 @@ import { CHAT_MODELS, type ChatModel } from "./models";
 
 export interface Hardware {
   wasm: boolean;
+
   gpu: boolean;
   f16: boolean;
   maxBuffer: number;
@@ -38,6 +39,7 @@ export async function detectHardware(): Promise<Hardware> {
   const info = adapter?.info;
   return {
     wasm: typeof WebAssembly !== "undefined",
+
     gpu: !!adapter && !info?.isFallbackAdapter && !adapter?.isFallbackAdapter,
     f16: !!adapter?.features.has("shader-f16"),
     maxBuffer: adapter?.limits.maxBufferSize || 0,
@@ -62,11 +64,17 @@ export function incompatibility(
   hardware: Hardware,
 ): string | undefined {
   if (!hardware.wasm) return "Este navegador no ofrece WebAssembly.";
+
+  if (model.backend !== "webgpu")
+    return "Este modelo CPU está retirado y no puede utilizarse.";
+
   if (model.backend === "webgpu") {
     if (!hardware.gpu)
-      return "Este navegador no ofrece una GPU compatible. Puedes usar Ligero con CPU.";
+      return "WebGPU no está disponible o está bloqueado en este navegador. Tanu no puede funcionar sin WebGPU.";
+
     if (!hardware.f16)
-      return "La GPU no ofrece shader-f16. Puedes usar Ligero con CPU.";
+      return "La GPU no ofrece shader-f16, necesario para los modelos de Tanu.";
+
     if (
       hardware.maxBinding < (model.minGpuBufferBytes || 128 * 1024 * 1024) ||
       hardware.maxBuffer <
@@ -75,51 +83,24 @@ export function incompatibility(
       return "Los límites de WebGPU son insuficientes para este modelo.";
   }
 }
+
 export function recommendModel(hardware: Hardware, states: ModelState[]) {
-  if (!hardware.wasm)
-    return {
-      key: CHAT_MODELS[0].key,
-      reason:
-        "Este navegador no admite WebAssembly. Usa un navegador compatible para preparar un modelo.",
-    };
-  const advanced = CHAT_MODELS[2];
-  const checked = states.find((s) => s.id === advanced.key);
-  if (
-    !incompatibility(advanced, hardware) &&
+  const model = CHAT_MODELS[1],
+    checked = states.find((s) => s.id === model.key);
+
+  const verified =
+    !incompatibility(model, hardware) &&
     hardware.device &&
     checked?.ready &&
-    checked.revision === advanced.revision &&
-    checked.checkedDevice === hardware.device
-  )
-    return {
-      key: advanced.key,
-      reason: "Avanzado ya superó la comprobación local con esta GPU.",
-    };
-  const gpuProblem = incompatibility(CHAT_MODELS[1], hardware);
-  if (gpuProblem) return { key: CHAT_MODELS[0].key, reason: gpuProblem };
-  if (hardware.deviceType === "mobile")
-    return {
-      key: CHAT_MODELS[0].key,
-      reason:
-        "En móvil o tableta recomendamos empezar con menor consumo. Puedes elegir otro modelo compatible.",
-    };
-  if (hardware.cpuThreads !== undefined && hardware.cpuThreads < 4)
-    return {
-      key: CHAT_MODELS[0].key,
-      reason:
-        "El navegador indica pocos núcleos lógicos; recomendamos empezar con Ligero. Es orientativo y puedes elegir otro modelo compatible.",
-    };
-  if ((hardware.ramGB || 0) >= 8)
-    return {
-      key: CHAT_MODELS[1].key,
-      reason:
-        "WebGPU compatible y al menos 8 GB de RAM aproximada. La carga comprobará la memoria gráfica disponible.",
-    };
+    checked.revision === model.revision &&
+    checked.checkedDevice === hardware.device;
+
   return {
-    key: CHAT_MODELS[0].key,
+    key: verified ? model.key : CHAT_MODELS[0].key,
     reason:
-      hardware.ramGB === undefined
-        ? "El navegador no indica la RAM; recomendamos empezar con Ligero. Puedes elegir otro modelo compatible."
-        : "La RAM aproximada es inferior a 8 GB; recomendamos empezar con Ligero. Puedes elegir otro modelo compatible.",
+      incompatibility(CHAT_MODELS[0], hardware) ||
+      (verified
+        ? "4B ya superó la comprobación local con esta GPU."
+        : "Empieza con 2B. El navegador no permite conocer la VRAM disponible."),
   };
 }

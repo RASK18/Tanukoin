@@ -1,6 +1,8 @@
-import { mkdir, readdir, copyFile, cp } from "node:fs/promises";
+import { mkdir, readdir, copyFile, cp, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
+// Retire the generated CPU runtime; model weights live separately in the browser.
+await rm("public/wllama/wllama.wasm", { force: true });
 const require = createRequire(import.meta.url);
 const transformer = require.resolve("@huggingface/transformers");
 const onnx = dirname(

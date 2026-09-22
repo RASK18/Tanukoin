@@ -6,7 +6,13 @@ export interface ChatModel {
   modelId: string;
   revision: string;
   backend: "wasm" | "webgpu";
-  dtype: "q8" | "q4f16_1";
+
+  engine: "wllama" | "webllm";
+
+  dtype: "Q4_K_M" | "q4f16_1";
+
+  ggufUrl?: string;
+
   downloadBytes: number;
   description: string;
   requirements: string;
@@ -15,68 +21,84 @@ export interface ChatModel {
   experimental?: boolean;
 }
 
+const gpu = (
+  size: string,
+  vram: number,
+  revision: string,
+  bytes: number,
+  buffer: number,
+): ChatModel => ({
+  key: `chat:gpu-${size.toLowerCase()}`,
+  name: `Qwen3.5 ${size} · GPU ${vram} GB`,
+
+  modelId: `Qwen3.5-${size}-q4f16_1-MLC`,
+  revision,
+  backend: "webgpu",
+  engine: "webllm",
+  dtype: "q4f16_1",
+
+  downloadBytes: bytes,
+  minGpuBufferBytes: buffer,
+  contextSize: 4096,
+  experimental: size === "9B",
+
+  description: "MLC q4f16_1 · generación con la tarjeta gráfica.",
+
+  requirements: `Perfil objetivo: ${vram} GB de VRAM. WebGPU y shader-f16; la memoria real depende del equipo y del contexto.`,
+});
+
+const cpu = (size: string, revision: string, bytes: number): ChatModel => ({
+  key: `chat:cpu-${size.toLowerCase()}`,
+  name: `Qwen3.5 ${size} · CPU`,
+  modelId: `unsloth/Qwen3.5-${size}-GGUF`,
+
+  revision,
+  backend: "wasm",
+  engine: "wllama",
+  dtype: "Q4_K_M",
+  downloadBytes: bytes,
+  contextSize: 4096,
+
+  ggufUrl: `https://huggingface.co/unsloth/Qwen3.5-${size}-GGUF/resolve/${revision}/Qwen3.5-${size}-Q4_K_M.gguf`,
+
+  description: "GGUF Q4_K_M · generación con el procesador, sin WebGPU.",
+
+  requirements:
+    size === "4B"
+      ? "Orientado a 16 GB de RAM. Necesita memoria libre adicional para el contexto y el navegador."
+      : "Para equipos más modestos. Necesita varios GB de RAM libres para el modelo y el contexto.",
+});
+
 export const CHAT_MODELS: readonly ChatModel[] = [
-  {
-    key: "chat:light",
-    name: "Ligero",
-    modelId: "onnx-community/Qwen3-1.7B-ONNX",
-    revision: "cc6a06a21d614e9b8e92a6adfab1074d4e7d2438",
-    backend: "wasm",
-    dtype: "q8",
-    downloadBytes: 1_760_000_000,
-    contextSize: 4096,
-    description:
-      "Qwen3 1.7B · 8 bits. Funciona sin tarjeta gráfica compatible; responde más despacio.",
-    requirements:
-      "CPU y WebAssembly. Necesita varios GB de RAM libres; la preparación comprobará la carga.",
-  },
-  {
-    key: "chat:balanced",
-    name: "Equilibrado",
-    modelId: "Qwen3-4B-q4f16_1-MLC",
-    revision: "a5c9fab855e3ccbdfed2e7e69683d75f30332161",
-    backend: "webgpu",
-    dtype: "q4f16_1",
-    downloadBytes: 2_500_000_000,
-    // Largest tensor in this pinned revision's tensor-cache.json.
-    minGpuBufferBytes: 194_478_080,
-    contextSize: 4096,
-    description:
-      "Qwen3 4B · 4 bits. Equilibrio entre capacidad y consumo de memoria.",
-    requirements:
-      "WebGPU y shader-f16. Memoria gráfica estimada: 3,4 GB, más margen para el navegador.",
-  },
-  {
-    key: "chat:advanced",
-    name: "Avanzado",
-    modelId: "Qwen3-8B-q4f16_1-MLC",
-    revision: "b3d55c289eae58f77095f5b68c895eeea358ee09",
-    backend: "webgpu",
-    dtype: "q4f16_1",
-    downloadBytes: 4_800_000_000,
-    minGpuBufferBytes: 311_164_928,
-    contextSize: 4096,
-    description:
-      "Qwen3 8B · 4 bits. Mayor capacidad de interpretación, con más consumo de memoria.",
-    requirements:
-      "GPU de 8 GB de VRAM, WebGPU y shader-f16. Estimación del modelo: 5,7 GB; contexto de 4096 tokens.",
-  },
-  {
-    key: "chat:balanced-trial",
-    name: "Qwen3.5 · prueba",
-    modelId: "Qwen3.5-4B-q4f16_1-MLC",
-    revision: "44b42469f9e192814bfd90440e3b377d89ba7a13",
-    backend: "webgpu",
-    dtype: "q4f16_1",
-    downloadBytes: 2_367_117_312,
-    contextSize: 4096,
-    minGpuBufferBytes: 317_849_600,
-    experimental: true,
-    description:
-      "Qwen3.5 4B · 4 bits. Alternativa en evaluación para mejorar la conversación con menos memoria que Avanzado.",
-    requirements:
-      "WebGPU y shader-f16. Memoria gráfica estimada: 3,9 GB, más margen para el navegador.",
-  },
+  gpu(
+    "2B",
+    4,
+    "dd74e9c8a20c4546df85c844103bff87b6dcacad",
+    1059315328,
+    254279680,
+  ),
+
+  gpu(
+    "4B",
+    8,
+    "44b42469f9e192814bfd90440e3b377d89ba7a13",
+    2367117312,
+    317849600,
+  ),
+
+  gpu(
+    "9B",
+    12,
+    "c7c5d3f5a81e37b8facbb72970940a1b131314a8",
+    5038040064,
+    508559360,
+  ),
+];
+// Metadatos conservados para detectar y desinstalar descargas anteriores.
+export const RETIRED_CPU_MODELS: readonly ChatModel[] = [
+  cpu("2B", "f6d5376be1edb4d416d56da11e5397a961aca8ae", 1280835840),
+  cpu("4B", "e87f176479d0855a907a41277aca2f8ee7a09523", 2740937888),
+  cpu("0.8B", "6ab461498e2023f6e3c1baea90a8f0fe38ab64d0", 532517120),
 ];
 export const RETIRED_CHAT_MODEL = "Qwen3-1.7B-q4f16_1-MLC";
 export const LEGACY_MODEL_KEY = "retired:Qwen3-1.7B-q4f16_1-MLC";

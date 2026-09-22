@@ -1,11 +1,16 @@
 import { useEffect, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { Check, Download, Trash2, MessageCircle, X } from "lucide-react";
+
+import { Check, Download, Trash2, X, Monitor } from "lucide-react";
+
 import { db } from "../../data/db";
 import { useApp } from "../../components/ui";
 import { activeChatModel, CHAT_MODELS, retiredModels } from "./models";
-import { cachedModelSize } from "./model-store";
+
+import { cachedModelSize, discoverCpuDownloads } from "./model-store";
+
 import { cancelChat, prepareChatModel, removeChatModel } from "./chat-runtime";
+
 import {
   detectHardware,
   incompatibility,
@@ -23,18 +28,26 @@ export function ChatModels({
   onWorking?: (busy: boolean) => void;
 }) {
   const { run, setBusy, notify } = useApp();
+
   const states = useLiveQuery(() => db.models.toArray(), []) || [];
+
   const [hardware, setHardware] = useState<Hardware>();
   const [working, setWorking] = useState<string>(),
     [progress, setProgress] = useState(0);
   const [sizes, setSizes] = useState<Record<string, number | undefined>>({});
   const active = activeChatModel(states),
     retired = retiredModels(states);
+
   const recommendation = hardware && recommendModel(hardware, states);
+  const compatibilityIssue =
+    hardware && incompatibility(CHAT_MODELS[0], hardware);
+
   useEffect(() => {
     onWorking?.(!!working);
   }, [working, onWorking]);
   useEffect(() => {
+    void discoverCpuDownloads().catch(() => {});
+
     void detectHardware()
       .then(setHardware)
       .catch((e) => notify(String(e)));
@@ -81,13 +94,26 @@ export function ChatModels({
       setBusy(false);
     }
   }
+
   return (
-    <section aria-label="Modelos de Tanu">
+    <section aria-label="Modelos de Tanu" className="chat-models gpu-models">
       <h2>Elige cómo hablar con Tanu</h2>
       <p>
         Un solo modelo de chat en memoria. Puedes cambiar de opción conservando
         las descargas.
       </p>
+
+      {compatibilityIssue && (
+        <div className="notice" role="alert">
+          <strong>Tanu no puede funcionar con la GPU en este navegador.</strong>
+          <p>{compatibilityIssue}</p>
+          <p>
+            El resto de funciones de Tanukoin sigue disponible. Comprueba la
+            aceleración gráfica y la configuración del navegador.
+          </p>
+        </div>
+      )}
+
       <p className="notice" role="status">
         {recommendation
           ? `Recomendado: ${CHAT_MODELS.find((m) => m.key === recommendation.key)!.name}. ${recommendation.reason}`
@@ -140,121 +166,142 @@ export function ChatModels({
           </p>
         </section>
       )}
-      <div className="model-grid chat-model-grid">
-        {CHAT_MODELS.map((model) => {
-          const state = states.find((s) => s.id === model.key);
-          const ready = state?.ready && state.revision === model.revision;
-          const reason = hardware && incompatibility(model, hardware);
-          const blocked = disabled || !!working || !hardware || !!reason;
-          return (
-            <section
-              className="card model-card"
-              key={model.key}
-              aria-label={`Modelo ${model.name}`}
-            >
-              <div className="card-heading">
-                <span className="feature-icon sage">
-                  <MessageCircle size={22} />
-                </span>
-                <span className={`model-status ${ready ? "ready" : ""}`}>
-                  {working === model.key || state?.preparing
-                    ? "Preparando"
-                    : ready
-                      ? "Listo"
-                      : state
-                        ? "Necesita revisión"
-                        : "Sin preparar"}
-                </span>
-              </div>
-              <h3>
-                {model.name}
-                {active?.key === model.key && " · En uso"}
-              </h3>
-              <p>{model.description}</p>
-              {model.experimental && (
-                <p className="notice">
-                  Opción de prueba. Puedes compararla con los modelos
-                  habituales; no cambia tu selección automáticamente.
-                </p>
-              )}
-              <dl>
-                <dt>Descarga aproximada</dt>
-                <dd>{size(model.downloadBytes)} + recursos auxiliares</dd>
-                <dt>Requisitos</dt>
-                <dd>{model.requirements}</dd>
-              </dl>
-              {reason && <p className="notice">{reason}</p>}
-              {state?.error && <p role="status">{state.error}</p>}
-              {working === model.key && (
-                <div className="model-progress">
-                  <progress
-                    max="1"
-                    value={progress}
-                    aria-label={`Preparación de ${model.name}`}
-                  />
-                  <p>
-                    {Math.round(progress * 100)} % · Descarga y comprobación sin
-                    conexión
-                  </p>
+
+      <div>
+        <div className="model-grid chat-model-grid">
+          {CHAT_MODELS.map((model) => {
+            const state = states.find((s) => s.id === model.key);
+            const ready = state?.ready && state.revision === model.revision;
+            const reason = hardware && incompatibility(model, hardware);
+            const blocked = disabled || !!working || !hardware || !!reason;
+            return (
+              <section
+                className={`card model-card ${recommendation?.key === model.key ? "recommended-model" : ""}`}
+
+                key={model.key}
+                aria-label={`Modelo ${model.name}`}
+              >
+                {model.experimental && (
+                  <span
+                    className="experimental-badge"
+                    title="Pendiente de pruebas reales en equipos de 12 GB de VRAM"
+                  >
+                    Experimental
+                  </span>
+                )}
+
+                <div className="card-heading">
+                  <span className="feature-icon sage">
+                    <Monitor size={22} />
+                  </span>
+                  <span className={`model-status ${ready ? "ready" : ""}`}>
+                    {working === model.key || state?.preparing
+                      ? "Preparando"
+                      : ready
+                        ? "Listo"
+                        : state
+                          ? "Necesita revisión"
+                          : "Sin preparar"}
+                  </span>
                 </div>
-              )}
-              <div className="button-row">
-                {ready ? (
-                  <button
-                    className="button primary"
-                    disabled={blocked}
-                    onClick={() => void prepare(model.key, false)}
-                  >
-                    {active?.key === model.key
-                      ? "Comprobar offline"
-                      : "Usar modelo"}
-                  </button>
-                ) : (
-                  <button
-                    className="button primary"
-                    disabled={blocked}
-                    onClick={() => void prepare(model.key, true)}
-                  >
-                    <Download size={16} />
-                    Descargar modelo
-                  </button>
+                <h3>
+                  {model.name}
+                  {active?.key === model.key && " · En uso"}
+                </h3>
+                <p>{model.description}</p>
+
+                {recommendation?.key === model.key && (
+                  <p>
+                    <Check size={16} /> Recomendado para este equipo
+                  </p>
                 )}
-                {state && !ready && (
-                  <button
-                    className="button secondary"
-                    disabled={blocked}
-                    onClick={() => void prepare(model.key, false)}
-                  >
-                    Comprobar offline
-                  </button>
+
+                {model.experimental && (
+                  <p className="notice">
+                    Pendiente de pruebas reales en equipos de 12 GB de VRAM
+                  </p>
                 )}
-                {state && (
-                  <button
-                    className="button secondary"
-                    disabled={disabled || !!working}
-                    onClick={() => void remove(model.key)}
-                  >
-                    <Trash2 size={16} />
-                    Desinstalar
-                  </button>
-                )}
+
+                <dl>
+                  <dt>Descarga aproximada</dt>
+                  <dd>{size(model.downloadBytes)} + recursos auxiliares</dd>
+                  <dt>Requisitos</dt>
+                  <dd>{model.requirements}</dd>
+                </dl>
+                {reason && <p className="notice">{reason}</p>}
+                {state?.error && <p role="status">{state.error}</p>}
                 {working === model.key && (
-                  <button className="button secondary" onClick={cancelChat}>
-                    <X size={14} />
-                    Cancelar
-                  </button>
+                  <div className="model-progress">
+                    <progress
+                      max="1"
+                      value={progress}
+                      aria-label={`Preparación de ${model.name}`}
+                    />
+                    <p>
+                      {Math.round(progress * 100)} % · Descarga y comprobación
+                      sin conexión
+                    </p>
+                  </div>
                 )}
-              </div>
-            </section>
-          );
-        })}
+                <div className="button-row">
+                  {ready ? (
+                    <button
+                      className="button primary"
+                      disabled={blocked}
+                      onClick={() => void prepare(model.key, false)}
+                    >
+                      {active?.key === model.key
+                        ? "Comprobar offline"
+                        : "Usar modelo"}
+                    </button>
+                  ) : (
+                    <button
+                      className="button primary"
+                      disabled={blocked}
+                      onClick={() => void prepare(model.key, true)}
+                    >
+                      <Download size={16} />
+                      Descargar modelo
+                    </button>
+                  )}
+                  {state && !ready && (
+                    <button
+                      className="button secondary"
+                      disabled={blocked}
+                      onClick={() => void prepare(model.key, false)}
+                    >
+                      Preparar desde caché
+                    </button>
+                  )}
+                  {state && (
+                    <button
+                      className="button secondary"
+                      disabled={disabled || !!working}
+                      onClick={() => void remove(model.key)}
+                    >
+                      <Trash2 size={16} />
+                      Desinstalar
+                    </button>
+                  )}
+                  {working === model.key && (
+                    <button className="button secondary" onClick={cancelChat}>
+                      <X size={14} />
+                      Cancelar
+                    </button>
+                  )}
+                </div>
+              </section>
+            );
+          })}
+        </div>
       </div>
       {!!retired.length && (
         <section className="card" aria-label="Modelos retirados">
           <h3>Modelos retirados</h3>
           <p>
-            Estos modelos ya no pueden utilizarse. Sus archivos se conservan
-            hasta que los desinstales.
+            Estos modelos ya no pueden utilizarse. Desinstálalos e instala uno
+            del catálogo actual para seguir usando Tanu. Sus archivos se
+            conservan hasta que los desinstales.
           </p>
           {retired.map((model) => (
             <div key={model.id} className="button-row">

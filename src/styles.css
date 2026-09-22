@@ -1,1 +1,24 @@
 @import url("./theme.css");
+.gpu-models .chat-model-grid .model-card {
+  background: #f3f8f2;
+}
+.chat-model-grid .model-card {
+  position: relative;
+}
+.chat-model-grid .model-card:has(.experimental-badge) {
+  padding-top: 3rem;
+}
+.experimental-badge {
+  position: absolute;
+  top: 0.65rem;
+  right: 0.65rem;
+  background: #f4e4c3;
+  color: #714d1e;
+  border-radius: 1rem;
+  padding: 0.25rem 0.65rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.chat-model-grid .recommended-model {
+  box-shadow: 0 0 0 2px #6b9275;
+}

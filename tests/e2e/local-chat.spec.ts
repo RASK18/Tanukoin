@@ -7,7 +7,7 @@ import type { harness } from "../browser/ai-harness";
 
 // Persistent, isolated test profiles retain GB-sized model downloads across reruns.
 // Build with TANUKOIN_AI_EVAL=1 first. No real user profile or data is accessed.
-for (const variant of ["light", "balanced", "advanced", "balanced-trial"])
+for (const variant of ["gpu-2b", "gpu-4b"])
   test(`modelo real ${variant}: evaluación y reinicio offline`, async () => {
     test.skip(
       process.env.TEST_CHAT_VARIANT !== variant,
@@ -16,12 +16,13 @@ for (const variant of ["light", "balanced", "advanced", "balanced-trial"])
     test.setTimeout(
       (process.env.TEST_CHAT_SMOKE === "1" ? 10 : 360) * 60 * 1000,
     );
-    const profile = resolve(`.cache/tanu-tests/${variant}`);
+    const profile = resolve(
+      `.cache/tanu-tests/${variant === "gpu-4b" ? "balanced-trial" : variant}`,
+    );
     mkdirSync(profile, { recursive: true });
     const context = await chromium.launchPersistentContext(profile, {
       channel: process.env.TEST_BROWSER_CHANNEL || "msedge",
       headless: true,
-      args: variant === "light" ? ["--disable-webgpu"] : [],
     });
     // Retain model caches, but let this run install the current build's service worker.
     const harnessUrl =
@@ -65,7 +66,7 @@ for (const variant of ["light", "balanced", "advanced", "balanced-trial"])
       writeFileSync(
         resolve(
           reportDir,
-          `${checkStyle ? "style-" : process.env.TEST_CHAT_COMPARE === "1" ? "comparison-" : ""}${variant}.json`,
+          `${checkStyle ? "style-" : process.env.TEST_CHAT_COMPARE === "1" ? "comparison-" : ""}${variant}${process.env.TEST_CHAT_LABEL ? `-${process.env.TEST_CHAT_LABEL}` : ""}.json`,
         ),
         JSON.stringify(report, null, 2),
       );
@@ -135,12 +136,10 @@ for (const variant of ["light", "balanced", "advanced", "balanced-trial"])
           });
       });
       await page.waitForFunction(() => !!navigator.serviceWorker.controller);
-      if (variant === "light")
-        await page.evaluate(() =>
-          Object.defineProperty(navigator, "gpu", { value: undefined }),
-        );
+      await page.reload();
+      await page.waitForFunction(() => !!window.tanuTest);
       report.hardware = await page.evaluate(() => window.tanuTest.hardware());
-      if (variant === "advanced") {
+      if (variant === "gpu-4b") {
         try {
           report.physicalGpu = execFileSync(
             "nvidia-smi",
@@ -166,6 +165,9 @@ for (const variant of ["light", "balanced", "advanced", "balanced-trial"])
         });
       }, `chat:${variant}`);
       report.prepared = true;
+      report.installations = await page.evaluate(() =>
+        window.tanuTest.models(),
+      );
       save();
       await context.setOffline(true);
       await page.reload();
@@ -174,10 +176,6 @@ for (const variant of ["light", "balanced", "advanced", "balanced-trial"])
         await page.locator('script[type="module"]').getAttribute("src"),
         "El reinicio offline debe conservar la misma compilación",
       ).toBe(expectedEntry);
-      if (variant === "light")
-        await page.evaluate(() =>
-          Object.defineProperty(navigator, "gpu", { value: undefined }),
-        );
       await page.evaluate(
         (key) => window.tanuTest.prepare(key, false),
         `chat:${variant}`,
@@ -188,7 +186,10 @@ for (const variant of ["light", "balanced", "advanced", "balanced-trial"])
       if (checkStyle) {
         const checks = [
           { questions: ["Hola, ¿qué tal?"], maxWords: 60 },
-          { questions: ["¿Qué es Tanukoin y para qué me sirve?"], maxWords: 60 },
+          {
+            questions: ["¿Qué es Tanukoin y para qué me sirve?"],
+            maxWords: 60,
+          },
           {
             questions: [
               "Estoy algo perdido con esta web, ¿por dónde empiezo?",
@@ -196,15 +197,28 @@ for (const variant of ["light", "balanced", "advanced", "balanced-trial"])
             ],
             maxWords: 60,
           },
-          { questions: ["¿Puedo comprar bitcoin aquí?"], maxWords: 60, deniesCrypto: true },
           {
-            questions: ["Antes dijiste que Tanukoin tiene una cartera de criptomonedas. ¿Dónde está?"],
+            questions: ["¿Puedo comprar bitcoin aquí?"],
             maxWords: 60,
             deniesCrypto: true,
           },
-          { questions: ["Explícame qué es un gasto fijo con un ejemplo sencillo."], maxWords: 60 },
           {
-            questions: ["Explícame con más detalle la diferencia entre gastos fijos y variables, con un ejemplo ficticio de cada uno."],
+            questions: [
+              "Antes dijiste que Tanukoin tiene una cartera de criptomonedas. ¿Dónde está?",
+            ],
+            maxWords: 60,
+            deniesCrypto: true,
+          },
+          {
+            questions: [
+              "Explícame qué es un gasto fijo con un ejemplo sencillo.",
+            ],
+            maxWords: 60,
+          },
+          {
+            questions: [
+              "Explícame con más detalle la diferencia entre gastos fijos y variables, con un ejemplo ficticio de cada uno.",
+            ],
             maxWords: 120,
           },
         ];
@@ -228,12 +242,20 @@ for (const variant of ["light", "balanced", "advanced", "balanced-trial"])
             const words = turn.text.trim().split(/\s+/).length;
             console.log(`Estilo: ${words} palabras · ${turn.question}`);
             expect.soft(["reply", "help"]).toContain(turn.kind);
-            expect.soft(words, turn.question).toBeLessThanOrEqual(check.maxWords);
+            expect
+              .soft(words, turn.question)
+              .toBeLessThanOrEqual(check.maxWords);
             if (check.deniesCrypto)
-              expect.soft(turn.text, "Debe negar la función inexistente").toMatch(/\bno\b/i);
+              expect
+                .soft(turn.text, "Debe negar la función inexistente")
+                .toMatch(/\bno\b/i);
             else
-              expect.soft(turn.text, "No debe introducir criptomonedas ni trading").not.toMatch(/cripto|bitcoin|blockchain|trading|staking/i);
-            expect.soft(turn.text, "No debe inventar reglas de redondeo").not.toMatch(/redonde/i);
+              expect
+                .soft(turn.text, "No debe introducir criptomonedas ni trading")
+                .not.toMatch(/cripto|bitcoin|blockchain|trading|staking/i);
+            expect
+              .soft(turn.text, "No debe inventar reglas de redondeo")
+              .not.toMatch(/redonde/i);
           }
         }
       }
@@ -367,29 +389,75 @@ for (const variant of ["light", "balanced", "advanced", "balanced-trial"])
       expect(recovery.cancelled).toBe(true);
       expect(recovery.result.content.length).toBeGreaterThan(0);
       if (
-        variant === "advanced" &&
-        (process.env.TEST_CHAT_SMOKE !== "1" ||
-          process.env.TEST_CHAT_CONTEXT === "1")
+        process.env.TEST_CHAT_SMOKE !== "1" ||
+        process.env.TEST_CHAT_CONTEXT === "1"
       ) {
-        const stress = await page.evaluate(() =>
-          window.tanuTest.contextStress(),
-        );
-        report.contextStress = stress;
+        try {
+          report.importCheck = await page.evaluate(() =>
+            window.tanuTest.importCheck(),
+          );
+          expect
+            .soft((report.importCheck as any).profile?.columns)
+            .toMatchObject({
+              date: 0,
+              description: 1,
+              amount: 2,
+              balance: 3,
+            });
+        } catch (error) {
+          report.importError = String(error);
+          expect
+            .soft(report.importError, "Importación asistida")
+            .toBeUndefined();
+        }
         save();
-        for (const result of stress) {
-          expect(result.promptTokens).toBeGreaterThanOrEqual(3300);
-          expect(
-            result.promptTokens + result.completionTokens,
-          ).toBeLessThanOrEqual(4096);
-          expect(JSON.parse(result.content)).toEqual({ ready: true });
+        try {
+          const stress = await page.evaluate(() =>
+            window.tanuTest.contextStress(),
+          );
+          report.contextStress = stress;
+          for (const result of stress) {
+            expect.soft(result.promptTokens).toBeGreaterThanOrEqual(3300);
+            expect
+              .soft(result.promptTokens + result.completionTokens)
+              .toBeLessThanOrEqual(4096);
+            expect.soft(JSON.parse(result.content)).toEqual({ ready: true });
+          }
+        } catch (error) {
+          report.contextError = String(error);
+          expect
+            .soft(
+              report.contextError,
+              "Contexto largo y conversación prolongada",
+            )
+            .toBeUndefined();
+        }
+        save();
+      }
+      if (variant === "gpu-4b" && process.env.TEST_CHAT_SMOKE !== "1") {
+        // Both variants must work in one profile; each preparation releases the previous engine.
+        await context.setOffline(false);
+        await page.evaluate(() => window.tanuTest.prepare("chat:gpu-2b", true));
+        await context.setOffline(true);
+        const switches = [];
+        for (const key of ["chat:gpu-4b", "chat:gpu-2b", "chat:gpu-4b"]) {
+          await page.evaluate(
+            (key) => window.tanuTest.prepare(key, false),
+            key,
+          );
+          const states = await page.evaluate(() => window.tanuTest.models());
+          expect(states.find((state) => state.id === "chat")?.modelKey).toBe(
+            key,
+          );
+          for (const id of ["chat:gpu-2b", "chat:gpu-4b"])
+            expect(states.find((state) => state.id === id)?.ready).toBe(true);
+          switches.push(key);
+          report.offlineSwitches = switches;
+          save();
         }
       }
       expect(errors, "Errores no controlados del navegador").toEqual([]);
-      report.accepted =
-        !ids &&
-        passes === 2 &&
-        test.info().errors.length === 0 &&
-        (variant !== "advanced" || /8192 MiB/.test(String(report.physicalGpu)));
+      report.accepted = !ids && passes === 2 && test.info().errors.length === 0;
     } catch (error) {
       report.error = String(error);
       save();

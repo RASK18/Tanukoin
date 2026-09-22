@@ -1,13 +1,34 @@
 import { test, expect } from "@playwright/test";
 import { createServer } from "node:http";
-import { readFile } from "node:fs/promises";
+import { readFile, mkdtemp, rm } from "node:fs/promises";
 import { resolve, extname, sep } from "node:path";
+import { tmpdir } from "node:os";
+import { generateSW } from "workbox-build";
 
 test("actualizar espera a cerrar la edición y conserva IndexedDB y cachés de modelos", async ({
   page,
 }) => {
   let revision = 1;
   const root = resolve("dist");
+  const legacyDirectory = await mkdtemp(
+    resolve(tmpdir(), "tanukoin-legacy-sw-"),
+  );
+  const legacyFile = resolve(legacyDirectory, "sw.js");
+  await generateSW({
+    swDest: legacyFile,
+    globDirectory: root,
+    globPatterns: [
+      "**/*.{js,mjs,css,html,json,wasm,bin,webp,png,bcmap,pfb,ttf,woff2,webmanifest}",
+    ],
+    globIgnores: ["sw.js", "version.json", "extension/**"],
+    maximumFileSizeToCacheInBytes: 30 * 1024 * 1024,
+    inlineWorkboxRuntime: true,
+    clientsClaim: true,
+    cleanupOutdatedCaches: true,
+    navigateFallback: "/Tanukoin/index.html",
+    navigateFallbackDenylist: [/bank-callback\.html/, /prueba-cpu\.html/],
+  });
+  const legacyWorker = await readFile(legacyFile);
   const types: Record<string, string> = {
     ".js": "text/javascript",
     ".mjs": "text/javascript",
@@ -29,6 +50,7 @@ test("actualizar espera a cerrar la edición y conserva IndexedDB y cachés de m
         return;
       }
       let body = await readFile(file);
+      if (relative === "sw.js" && revision === 1) body = legacyWorker;
       if (relative === "sw.js")
         body = Buffer.concat([
           body,
@@ -82,6 +104,7 @@ test("actualizar espera a cerrar la edición y conserva IndexedDB y cachés de m
     await expect(
       page.getByRole("button", { name: "Actualizar ahora" }),
     ).toHaveCount(0);
+    expect(await page.evaluate(() => crossOriginIsolated)).toBe(true);
     expect(
       await page.evaluate(async () => {
         const cache = await caches.open("tanukoin-embeddings-v1");
@@ -91,5 +114,7 @@ test("actualizar espera a cerrar la edición y conserva IndexedDB y cachés de m
   } finally {
     server.closeAllConnections();
     await new Promise<void>((done) => server.close(() => done()));
+    if (legacyDirectory.startsWith(resolve(tmpdir(), "tanukoin-legacy-sw-")))
+      await rm(legacyDirectory, { recursive: true, force: true });
   }
 });

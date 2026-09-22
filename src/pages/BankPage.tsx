@@ -1,4 +1,5 @@
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
+
 import { Link } from "react-router-dom";
 import {
   Landmark,
@@ -44,6 +45,13 @@ export function BankPage() {
     [busy, setWorking] = useState(false),
     [preview, setPreview] = useState<Movement[]>();
   const abort = useRef<AbortController | null>(null);
+
+  const authorization = useRef<AbortController | null>(null);
+
+  const [authorizing, setAuthorizing] = useState(false);
+
+  useEffect(() => () => authorization.current?.abort(), []);
+
   async function work(action: () => Promise<void>) {
     setWorking(true);
     setBusy(true);
@@ -69,6 +77,19 @@ export function BankPage() {
           sí se envían a Enable Banking para acceder a tus cuentas.
         </span>
       </div>
+
+      {authorizing && (
+        <div className="notice" role="status">
+          Autorización pendiente (máximo 10 minutos).
+          <button
+            className="button secondary"
+            onClick={() => authorization.current?.abort()}
+          >
+            Cancelar autorización
+          </button>
+        </div>
+      )}
+
       <div className="bank-grid">
         <section className="card">
           <div className="card-heading">
@@ -267,7 +288,22 @@ export function BankPage() {
                   disabled={bankIndex === ""}
                   onClick={() =>
                     work(async () => {
-                      const s = await authorize(banks[Number(bankIndex)]);
+                      authorization.current = new AbortController();
+
+                      setAuthorizing(true);
+
+                      let s: BankSession;
+
+                      try {
+                        s = await authorize(
+                          banks[Number(bankIndex)],
+                          authorization.current.signal,
+                        );
+                      } finally {
+                        setAuthorizing(false);
+                        authorization.current = null;
+                      }
+
                       setSession(s);
                       setSelected(s.accounts[0]?.uid || "");
                       if (!s.accounts.length)

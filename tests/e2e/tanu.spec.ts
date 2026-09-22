@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { CHAT_MODELS } from "../../src/features/ai/models";
+import { CHAT_MODELS, RETIRED_CPU_MODELS } from "../../src/features/ai/models";
 
 test("perfil del dispositivo: ignora la cuota artificial y se adapta a móvil", async ({
   page,
@@ -34,12 +34,12 @@ test("perfil del dispositivo: ignora la cuota artificial y se adapta a móvil", 
     "Escritorio",
   ]);
   const models = page.getByLabel("Modelos de Tanu");
-  await expect(models).toContainText("Recomendado: Equilibrado");
+  await expect(models).toContainText("Recomendado: Qwen3.5 2B · GPU 4 GB");
   await expect(models).not.toContainText("Libera espacio");
   await expect(models).not.toContainText("Espacio disponible estimado");
   await expect(
     page
-      .getByLabel("Modelo Equilibrado", { exact: true })
+      .getByLabel("Modelo Qwen3.5 4B · GPU 8 GB", { exact: true })
       .getByRole("button", { name: "Descargar modelo" }),
   ).toBeEnabled();
   await profile.screenshot({
@@ -74,7 +74,13 @@ test("perfil del dispositivo: ignora la cuota artificial y se adapta a móvil", 
     "No disponible",
     "Móvil / tableta",
   ]);
-  await expect(models).toContainText("Recomendado: Ligero");
+  await expect(models.getByRole("alert")).toContainText(
+    "WebGPU no está disponible o está bloqueado",
+  );
+  for (const button of await models
+    .getByRole("button", { name: "Descargar modelo" })
+    .all())
+    await expect(button).toBeDisabled();
 });
 
 test("sin modelo solo ofrece la guía breve y enlace accesible, sin descargas", async ({
@@ -98,9 +104,9 @@ test("sin modelo solo ofrece la guía breve y enlace accesible, sin descargas", 
   await link.focus();
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/#\/ia$/);
-  for (const name of CHAT_MODELS.map((model) => model.name))
+  for (const model of CHAT_MODELS)
     await expect(
-      page.getByLabel(`Modelo ${name}`, { exact: true }),
+      page.getByLabel(`Modelo ${model.name}`, { exact: true }),
     ).toBeVisible();
   await expect(page.getByLabel("Modelos de Tanu")).toContainText(
     "Recomendado:",
@@ -112,8 +118,25 @@ test("las opciones de modelos caben en móvil y conservan acceso por teclado", a
   page,
 }, info) => {
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "gpu", {
+      configurable: true,
+      value: {
+        requestAdapter: async () => ({
+          features: new Set(["shader-f16"]),
+          limits: { maxBufferSize: 1e9, maxStorageBufferBindingSize: 1e9 },
+        }),
+      },
+    });
+  });
   await page.goto("/Tanukoin/#/ia");
-  const light = page.getByLabel("Modelo Ligero", { exact: true });
+  await page.evaluate(() =>
+    navigator.serviceWorker.ready.then(() => undefined),
+  );
+  await page.reload();
+  const light = page.getByLabel("Modelo Qwen3.5 2B · GPU 4 GB", {
+    exact: true,
+  });
   const download = light.getByRole("button", { name: "Descargar modelo" });
   await expect(download).toBeEnabled();
   await download.focus();
@@ -139,6 +162,56 @@ test("las opciones de modelos caben en móvil y conservan acceso por teclado", a
     path: info.outputPath("modelos-escritorio.png"),
     fullPage: true,
   });
+});
+
+test("retira CPU 0.8B instalado y mantiene GPU 4B preparado como opción independiente", async ({
+  page,
+}) => {
+  await page.goto("/Tanukoin/#/ia");
+  await page
+    .getByLabel("Modelo Qwen3.5 2B · GPU 4 GB", { exact: true })
+    .waitFor();
+  await page.evaluate(
+    async ({ cpu, gpu }) => {
+      const database = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open("tanukoin");
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      const tx = database.transaction("models", "readwrite");
+      for (const model of [cpu, gpu]) {
+        const state = {
+          id: model.key,
+          modelKey: model.key,
+          revision: model.revision,
+          ready: true,
+          savedAt: "2026-09-22",
+        };
+        tx.objectStore("models").put(state);
+        if (model.key === cpu.key)
+          tx.objectStore("models").put({ ...state, id: "chat" });
+      }
+      await new Promise<void>((resolve, reject) => {
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+      database.close();
+    },
+    { cpu: RETIRED_CPU_MODELS[2], gpu: CHAT_MODELS[1] },
+  );
+  await page.reload();
+  const retired = page.getByLabel("Modelos retirados");
+  await expect(retired).toContainText("Qwen3.5 0.8B · CPU");
+  await expect(retired).toContainText("Desinstálalos e instala uno");
+  await expect(retired.getByRole("button")).toHaveCount(1);
+  await expect(
+    retired.getByRole("button", { name: "Desinstalar" }),
+  ).toBeEnabled();
+  const gpu = page.getByLabel("Modelo Qwen3.5 4B · GPU 8 GB", { exact: true });
+  await expect(gpu).toContainText("Listo");
+  await expect(gpu.getByRole("button", { name: "Usar modelo" })).toBeVisible();
+  await page.getByRole("button", { name: "Hablar con Tanu" }).click();
+  await expect(page.getByLabel("Pregunta a Tanu")).toHaveCount(0);
 });
 
 test("una variante vigente preparada habilita el chat al arrancar", async ({
@@ -183,7 +256,9 @@ test("retira Qwen GPU 1.7B sin borrar su caché ni habilitar el chat", async ({
   page,
 }) => {
   await page.goto("/Tanukoin/#/ia");
-  await page.getByLabel("Modelo Ligero", { exact: true }).waitFor();
+  await page
+    .getByLabel("Modelo Qwen3.5 2B · GPU 4 GB", { exact: true })
+    .waitFor();
   await page.evaluate(async () => {
     const cache = await caches.open("retirement-fixture");
     await cache.put(
@@ -221,9 +296,9 @@ test("retira Qwen GPU 1.7B sin borrar su caché ni habilitar el chat", async ({
   await expect(
     retired.getByRole("button", { name: "Usar modelo" }),
   ).toHaveCount(0);
-  await expect(page.getByLabel("Modelo Ligero", { exact: true })).toContainText(
-    "Sin preparar",
-  );
+  await expect(
+    page.getByLabel("Modelo Qwen3.5 2B · GPU 4 GB", { exact: true }),
+  ).toContainText("Sin preparar");
   await page.getByRole("button", { name: "Hablar con Tanu" }).click();
   await expect(page.getByLabel("Pregunta a Tanu")).toHaveCount(0);
   expect(

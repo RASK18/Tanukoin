@@ -11,6 +11,7 @@ playwright-report/
 *.tsbuildinfo
 artifacts/
 public/onnx/
+public/wllama/
 public/pdf/
 .pnpm-store/
 .cache/tanu-tests/

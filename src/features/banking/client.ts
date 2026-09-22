@@ -79,15 +79,23 @@ export async function jwt() {
 export async function bankRequest<T>(
   action: string,
   payload: Record<string, unknown> = {},
+  signal?: AbortSignal,
 ): Promise<T> {
+  if (signal?.aborted) throw new Error("Autorización cancelada.");
   if (!(await db.settings.get("main"))?.banking)
     throw new Error("Activa la conexión bancaria en Ajustes.");
   const token = action === "ping" ? undefined : await jwt();
   const id = crypto.randomUUID();
   return new Promise((resolve, reject) => {
+    const cancel = () => {
+      clearTimeout(timer);
+      window.removeEventListener("message", listener);
+      reject(new Error("Autorización cancelada."));
+    };
     const timer = setTimeout(
       () => {
         window.removeEventListener("message", listener);
+        signal?.removeEventListener("abort", cancel);
         reject(
           new Error(
             action === "ping"
@@ -108,17 +116,34 @@ export async function bankRequest<T>(
         return;
       clearTimeout(timer);
       window.removeEventListener("message", listener);
+      signal?.removeEventListener("abort", cancel);
       if (event.data.error) reject(new Error(event.data.error));
       else resolve(event.data.result);
     };
     window.addEventListener("message", listener);
+    signal?.addEventListener("abort", cancel, { once: true });
+    if (signal?.aborted) {
+      cancel();
+      return;
+    }
     window.postMessage(
       { channel: "tanukoin-bank-request", id, action, token, payload },
       location.origin,
     );
   });
 }
-export async function authorize(bank: Bank): Promise<BankSession> {
+
+export async function authorize(
+  bank: Bank,
+  signal?: AbortSignal,
+): Promise<BankSession> {
+  if (typeof BroadcastChannel === "undefined")
+    throw new Error(
+      "El navegador no admite el retorno seguro de la autorización bancaria.",
+    );
+
+  if (signal?.aborted) throw new Error("Autorización cancelada.");
+
   const popup = window.open(
     "about:blank",
     "tanukoin-bank",
@@ -128,16 +153,22 @@ export async function authorize(bank: Bank): Promise<BankSession> {
     throw new Error("Permite abrir la ventana de autorización del banco.");
   const state = crypto.randomUUID();
   try {
-    const result = await bankRequest<{ url: string }>("authorize", {
-      aspsp: bank,
-      state,
-      redirect_url: `${location.origin}${import.meta.env.BASE_URL}bank-callback.html`,
-      valid_until: new Date(
-        Date.now() +
-          Math.min(bank.maximum_consent_validity || 30 * 86400, 30 * 86400) *
-            1000,
-      ).toISOString(),
-    });
+    const result = await bankRequest<{ url: string }>(
+      "authorize",
+      {
+        aspsp: bank,
+        state,
+        redirect_url: `${location.origin}${import.meta.env.BASE_URL}bank-callback.html`,
+        valid_until: new Date(
+          Date.now() +
+            Math.min(bank.maximum_consent_validity || 30 * 86400, 30 * 86400) *
+              1000,
+        ).toISOString(),
+      },
+      signal,
+    );
+    if (signal?.aborted) throw new Error("Autorización cancelada.");
+
     const url = new URL(result.url);
     if (
       url.protocol !== "https:" ||
@@ -150,38 +181,68 @@ export async function authorize(bank: Bank): Promise<BankSession> {
         "El proveedor devolvió una URL de autorización inesperada.",
       );
     const code = await new Promise<string>((resolve, reject) => {
+      const channel = new BroadcastChannel(`tanukoin-bank-auth:${state}`);
+
       const cleanup = () => {
         clearTimeout(timeout);
-        clearInterval(closed);
-        window.removeEventListener("message", listener);
+        channel.close();
+        signal?.removeEventListener("abort", cancel);
       };
-      const listener = (event: MessageEvent) => {
-        if (
-          event.origin !== location.origin ||
-          event.source !== popup ||
-          event.data?.channel !== "tanukoin-bank-auth" ||
-          event.data.state !== state
-        )
-          return;
+
+      const cancel = () => {
         cleanup();
-        if (event.data.error || !event.data.code)
-          reject(new Error("Autorización cancelada o rechazada."));
-        else resolve(event.data.code);
+        reject(new Error("Autorización cancelada."));
       };
       const timeout = setTimeout(() => {
         cleanup();
         reject(new Error("La autorización ha caducado. Vuelve a iniciarla."));
       }, 10 * 60000);
-      const closed = setInterval(() => {
-        if (popup.closed) {
-          cleanup();
-          reject(new Error("Se cerró la autorización."));
-        }
-      }, 1000);
-      window.addEventListener("message", listener);
-      popup.location.href = url.href;
+
+      channel.onmessage = (event: MessageEvent) => {
+        if (
+          event.data?.channel !== "tanukoin-bank-auth" ||
+          event.data.state !== state
+        )
+          return;
+        cleanup();
+
+        if (
+          event.data.error ||
+          typeof event.data.code !== "string" ||
+          !event.data.code
+        )
+          reject(new Error("Autorización cancelada o rechazada."));
+        else resolve(event.data.code);
+      };
+
+      signal?.addEventListener("abort", cancel, { once: true });
+
+      if (signal?.aborted) {
+        cancel();
+        return;
+      }
+
+      // COOP can sever the popup proxy: popup.closed does not mean the user cancelled.
+
+      try {
+        popup.location.href = url.href;
+      } catch (error) {
+        cleanup();
+        reject(error);
+      }
     });
-    session = await bankRequest<BankSession>("session", { code });
+
+    if (signal?.aborted) throw new Error("Autorización cancelada.");
+
+    const authorized = await bankRequest<BankSession>(
+      "session",
+      { code },
+      signal,
+    );
+    if (signal?.aborted) throw new Error("Autorización cancelada.");
+
+    session = authorized;
+
     return session;
   } finally {
     popup.close();

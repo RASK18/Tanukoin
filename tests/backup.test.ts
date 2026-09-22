@@ -18,6 +18,7 @@ it("restaura datos atómicamente y no restaura consentimientos de red", async ()
     maps: true,
     hideImportWelcome: true,
     hideTanuWelcome: false,
+    cpuThreads: 6,
   });
   const profile = {
     ...defaultProfile,
@@ -41,6 +42,7 @@ it("restaura datos atómicamente y no restaura consentimientos de red", async ()
   expect((await db.settings.get("main"))?.maps).toBe(false);
   expect((await db.settings.get("main"))?.hideImportWelcome).toBe(true);
   expect((await db.settings.get("main"))?.hideTanuWelcome).toBe(false);
+  expect((await db.settings.get("main"))?.cpuThreads).toBe(6);
   expect((await db.movements.toArray())[0].balance).toBe(10000);
   raw.data.movements[0].balance = "100";
   expect(() => validateBackup(raw)).toThrow();

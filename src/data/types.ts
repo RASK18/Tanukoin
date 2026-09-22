@@ -106,6 +106,7 @@ export interface ImportProfile {
 export interface Settings {
   hideImportWelcome?: boolean;
   hideTanuWelcome?: boolean;
+  cpuThreads?: "auto" | number;
   id: "main";
   maps: boolean;
   search: boolean;
@@ -137,7 +138,15 @@ export interface ModelState {
   preparing?: boolean;
   error?: string;
   checkedDevice?: string;
-  resources?: { cache?: string; model?: string; library?: string };
+  engine?: "wllama" | "webllm";
+  quantization?: string;
+  activeThreads?: number;
+  resources?: {
+    cache?: string;
+    model?: string;
+    library?: string;
+    gguf?: string;
+  };
 }
 export interface Embedding {
   id: string;
