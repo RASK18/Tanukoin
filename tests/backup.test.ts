@@ -48,14 +48,16 @@ it("restaura datos atómicamente y no restaura consentimientos de red", async ()
   expect(() => validateBackup(raw)).toThrow();
 });
 it("acepta copias antiguas y rechaza preferencias de bienvenida inválidas", async () => {
+  const previousSettings = await db.settings.get("main");
   const raw = JSON.parse(await exportBackup());
+  raw.data.settings[0].timezone = "Pacific/Auckland";
   expect(() => validateBackup(raw)).not.toThrow();
   for (const key of ["hideImportWelcome", "hideTanuWelcome"]) {
     raw.data.settings[0][key] = "true";
     await expect(restoreBackup(raw)).rejects.toThrow(
       "Preferencia de bienvenida",
     );
-    expect((await db.settings.get("main"))?.timezone).toBe("Europe/Madrid");
+    expect(await db.settings.get("main")).toEqual(previousSettings);
     delete raw.data.settings[0][key];
   }
 });

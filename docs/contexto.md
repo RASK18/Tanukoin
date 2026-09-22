@@ -166,6 +166,8 @@ Cambiar origen o perfil del navegador cambia el espacio de almacenamiento. No lo
 
 ## Validación registrada y límites pendientes
 
+- GitHub Actions del commit `8441f15` se detuvo en una prueba de copias que suponía `Europe/Madrid`, mientras el runner usaba UTC; compilación y despliegue quedaron omitidos. Se reprodujo con `TZ=UTC`. La prueba compara ahora todos los ajustes anteriores tras rechazar una copia inválida, cuya zona horaria es distinta, sin depender de la zona del equipo. Las 90 pruebas unitarias pasan con `TZ=UTC` y `TZ=Europe/Madrid`. Ejecución afectada: [35774536433](https://github.com/RASK18/Tanukoin/actions/runs/35774536433).
+
 En el cambio funcional 0.1.6 pasaron **26 pruebas unitarias y 10 pruebas de navegador**, además de tipos, compilación y el workflow de publicación. Dos pruebas opcionales de modelos no se ejecutan en la suite normal. Estos números son una referencia de esa revisión, no sustituyen ejecutar las pruebas del siguiente cambio.
 
 Se probaron importación de archivos, arrastre, columnas desordenadas, saldos, duplicados frente a guardados, PDF de varias páginas, copias, navegación móvil/escritorio y actualización conservando datos/cachés. El PDF privado se importó y exportó localmente con todos sus movimientos y saldos, sin tráfico externo.
