@@ -5,6 +5,53 @@ async function choose(page: Page, label: string, text: string, option: string) {
   await page.getByRole("combobox", { name: label, exact: true }).fill(text);
   await page.getByRole("option", { name: option, exact: true }).click();
 }
+
+async function dragCategory(
+  page: Page,
+  source: string,
+  targetId: string,
+  inside: boolean,
+  release = true,
+) {
+  const handle = page.getByRole("button", {
+    name: "Mover " + source,
+    exact: true,
+  });
+  await handle.scrollIntoViewIfNeeded();
+  const origin = (await handle.boundingBox())!;
+  const sourceRow = handle.locator("xpath=ancestor::li[1]");
+  const depth = Number(await sourceRow.getAttribute("data-depth"));
+  const step = await page
+    .locator(".category-editor-tree")
+    .evaluate((el) =>
+      parseFloat(getComputedStyle(el).getPropertyValue("--tree-indent")),
+    );
+  const x = origin.x + origin.width / 2,
+    y = origin.y + origin.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + 6, y, { steps: 2 });
+  const target = page.locator('[data-category-id="' + targetId + '"]');
+  await target.scrollIntoViewIfNeeded();
+  const desired =
+    Number(await target.getAttribute("data-depth")) + (inside ? 1 : 0);
+  const dest = await target.evaluate((el) => ({
+    top:
+      el.parentElement!.getBoundingClientRect().top +
+      (el as HTMLElement).offsetTop,
+    height: (el as HTMLElement).offsetHeight,
+  }));
+  await page.mouse.move(
+    x + (desired - depth) * step,
+    dest.top + (inside ? dest.height - 3 : 3),
+    { steps: 12 },
+  );
+  if (release) {
+    await page.mouse.up();
+    await expect(page.locator(".category-placeholder")).toHaveCount(0);
+  }
+}
+
 async function seed(page: Page) {
   await page.goto("/Tanukoin/");
   await expect(
@@ -226,18 +273,7 @@ test("crea un cuarto nivel, mueve ramas y confirma la eliminación con su impact
       exact: true,
     }),
   ).toBeVisible();
-  await page
-    .getByRole("button", { name: "Mover Viajes → Transporte", exact: true })
-    .click();
-  await expect(
-    page.getByRole("button", {
-      name: "Mover dentro de Viajes → Transporte → Vuelos",
-      exact: true,
-    }),
-  ).toHaveCount(0);
-  await page
-    .getByRole("button", { name: "Mover dentro de Vivienda", exact: true })
-    .click();
+  await dragCategory(page, "Viajes → Transporte", "home", true);
   await expect(
     page.getByRole("button", {
       name: "Mover Vivienda → Transporte → Vuelos → Internacionales",
@@ -491,30 +527,18 @@ test("edita en línea, elige emojis, arrastra y conserva el orden al recargar", 
   await page
     .getByRole("button", { name: "Contraer todo", exact: true })
     .click();
-  const handle = page.getByRole("button", {
-    name: "Mover Vivienda",
-    exact: true,
-  });
-  await handle.scrollIntoViewIfNeeded();
-  const box = (await handle.boundingBox())!;
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(box.x + box.width / 2 + 12, box.y + box.height / 2, {
-    steps: 3,
-  });
-  const target = page.getByRole("button", {
-    name: "Colocar antes de Comida",
-    exact: true,
-  });
-  await target.scrollIntoViewIfNeeded();
-  const dest = (await target.boundingBox())!;
-  await page.mouse.move(dest.x + dest.width / 2, dest.y + dest.height / 2, {
-    steps: 15,
+  await dragCategory(page, "Vivienda", "food", false, false);
+  await expect(page.locator(".category-placeholder")).toHaveAttribute(
+    "data-preview-index",
+    "0",
+  );
+  await expect(page.locator(".category-columns")).toBeVisible();
+  await expect(page.locator(".category-drop")).toHaveCount(0);
+  await page.screenshot({
+    path: "test-results/categories-drag-preview.png",
+    animations: "disabled",
   });
   await page.mouse.up();
-  await expect(
-    page.getByRole("button", { name: "Cancelar movimiento" }),
-  ).toHaveCount(0);
   await expect(page.locator("[data-category-id]").first()).toHaveAttribute(
     "data-category-id",
     "home",
@@ -524,27 +548,19 @@ test("edita en línea, elige emojis, arrastra y conserva el orden al recargar", 
     "data-category-id",
     "home",
   );
+  // Keyboard: move below the last child, then outdent to a root.
   await page
     .getByRole("button", { name: "Mover Comida → Restaurantes", exact: true })
     .focus();
-  await page.keyboard.press("Enter");
-  await page
-    .getByRole("button", {
-      name: "Convertir en categoría principal",
-      exact: true,
-    })
-    .focus();
+  await page.keyboard.press("Space");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowLeft");
   await page.keyboard.press("Enter");
   await expect(
     page.getByLabel("Nombre de Restaurantes", { exact: true }),
   ).toBeVisible();
   await page.setViewportSize({ width: 320, height: 844 });
-  await page
-    .getByRole("button", { name: "Mover Restaurantes", exact: true })
-    .click();
-  await page
-    .getByRole("button", { name: "Mover dentro de Comida", exact: true })
-    .click();
+  await dragCategory(page, "Restaurantes", "food", true);
   await expect(
     page.getByLabel("Nombre de Comida → Restaurantes", { exact: true }),
   ).toBeVisible();
@@ -585,7 +601,7 @@ test("edita en línea, elige emojis, arrastra y conserva el orden al recargar", 
 
 test.describe("Interacción táctil de categorías", () => {
   test.use({ hasTouch: true, viewport: { width: 390, height: 844 } });
-  test("arrastra con tacto y permite elegir destinos mediante toques", async ({
+  test("arrastra con tacto manteniendo visible el árbol", async ({
     page,
     context,
   }) => {
@@ -611,18 +627,22 @@ test.describe("Interacción táctil de categorías", () => {
       type: "touchMove",
       touchPoints: [{ x: x + 12, y }],
     });
-    const target = page.getByRole("button", {
-      name: "Mover dentro de Alimentación",
-      exact: true,
-    });
+    const target = page.locator('[data-category-id="food"]');
     await target.scrollIntoViewIfNeeded();
-    const drop = (await target.boundingBox())!;
+    const drop = await target.evaluate((el) => ({
+      top:
+        el.parentElement!.getBoundingClientRect().top +
+        (el as HTMLElement).offsetTop,
+      height: (el as HTMLElement).offsetHeight,
+    }));
     await session.send("Input.dispatchTouchEvent", {
       type: "touchMove",
-      touchPoints: [
-        { x: drop.x + drop.width / 2, y: drop.y + drop.height / 2 },
-      ],
+      touchPoints: [{ x: x + 20, y: drop.top + drop.height - 3 }],
     });
+    await expect(page.locator(".category-placeholder")).toHaveAttribute(
+      "data-preview-parent",
+      "food",
+    );
     await session.send("Input.dispatchTouchEvent", {
       type: "touchEnd",
       touchPoints: [],
@@ -630,21 +650,100 @@ test.describe("Interacción táctil de categorías", () => {
     await expect(
       page.getByLabel("Nombre de Alimentación → Compras", { exact: true }),
     ).toBeVisible();
-    await page
-      .getByRole("button", {
-        name: "Mover Alimentación → Compras",
-        exact: true,
-      })
-      .tap();
-    await page
-      .getByRole("button", {
-        name: "Convertir en categoría principal",
-        exact: true,
-      })
-      .tap();
-    await expect(
-      page.getByLabel("Nombre de Compras", { exact: true }),
-    ).toBeVisible();
     await session.detach();
   });
+});
+
+test("muestra jerarquía sin rutas, respeta hover y permite cancelar la reorganización", async ({
+  page,
+}) => {
+  await seed(page);
+  await page.goto("#/categorias");
+  await page.mouse.move(0, 0);
+  const name = page.getByLabel("Nombre de Alimentación", { exact: true });
+  await expect(name).toHaveCSS("border-top-color", "rgba(0, 0, 0, 0)");
+  await name.hover();
+  await expect(name).not.toHaveCSS("border-top-color", "rgba(0, 0, 0, 0)");
+  await expect(
+    page
+      .getByRole("button", { name: "Emoji de Alimentación", exact: true })
+      .locator("svg"),
+  ).toHaveCount(0);
+  const child = page.locator('[data-category-id="restaurants"]');
+  await expect(child.locator(".tree-guide.elbow")).toHaveCount(1);
+  await expect(child).not.toContainText("Alimentación");
+  await page.getByLabel("Buscar categorías").fill("vuelos");
+  await expect(page.locator("[data-category-id]")).toHaveCount(3);
+  await page.getByLabel("Buscar categorías").fill("");
+  await page.getByLabel("Buscar categorías").blur();
+  await page.mouse.move(0, 0);
+  await page.setViewportSize({ width: 1672, height: 960 });
+  await page.screenshot({
+    path: "test-results/categories-reference-desktop.png",
+    animations: "disabled",
+  });
+  await page
+    .getByRole("button", { name: "Contraer todo", exact: true })
+    .click();
+  const original = await page
+    .locator("[data-category-id]")
+    .evaluateAll((els) => els.map((e) => e.getAttribute("data-category-id")));
+  const firstTop = await page
+    .locator('[data-category-id="food"]')
+    .evaluate((el) => (el as HTMLElement).offsetTop);
+  await dragCategory(page, "Vivienda", "food", false, false);
+  expect(
+    await page
+      .locator('[data-category-id="food"]')
+      .evaluate((el) => (el as HTMLElement).offsetTop),
+  ).toBeGreaterThan(firstTop);
+  const second = page.locator('[data-category-id="shopping"]');
+  const nextGap = await second.evaluate((el) => ({
+    x: el.getBoundingClientRect().left + 26,
+    y:
+      el.parentElement!.getBoundingClientRect().top +
+      (el as HTMLElement).offsetTop +
+      3,
+  }));
+  await page.mouse.move(nextGap.x, nextGap.y, { steps: 10 });
+  await expect(page.locator(".category-placeholder")).toHaveAttribute(
+    "data-preview-index",
+    "1",
+  );
+  expect(
+    await page
+      .locator('[data-category-id="food"]')
+      .evaluate((el) => (el as HTMLElement).offsetTop),
+  ).toBe(firstTop);
+  const storedOrder = await page.evaluate(async () => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const r = indexedDB.open("tanukoin");
+      r.onsuccess = () => resolve(r.result);
+      r.onerror = () => reject(r.error);
+    });
+    const result = await new Promise<any>((resolve, reject) => {
+      const r = database
+        .transaction("categories")
+        .objectStore("categories")
+        .get("home");
+      r.onsuccess = () => resolve(r.result);
+      r.onerror = () => reject(r.error);
+    });
+    database.close();
+    return result.order;
+  });
+  expect(storedOrder).toBeUndefined();
+  await page.keyboard.press("Escape");
+  await page.mouse.up();
+  expect(
+    await page
+      .locator("[data-category-id]")
+      .evaluateAll((els) => els.map((e) => e.getAttribute("data-category-id"))),
+  ).toEqual(original);
+  await page.reload();
+  expect(
+    await page
+      .locator('[data-depth="0"]')
+      .evaluateAll((els) => els.map((e) => e.getAttribute("data-category-id"))),
+  ).toEqual(original);
 });

@@ -1,3 +1,4 @@
+import { projectCategoryGap } from "../src/lib/category-sort";
 import Dexie from "dexie";
 import { beforeEach, expect, it, vi } from "vitest";
 import { db, initialize, readSnapshot } from "../src/data/db";
@@ -519,4 +520,20 @@ it("rechaza destinos cíclicos, ausentes y duplicados sin modificar el orden", a
     moveCategory("trip", { targetId: "missing", position: "before" }),
   ).rejects.toThrow("ya no existe");
   expect(await db.categories.toArray()).toEqual(before);
+});
+
+it("proyecta huecos y sangrías sin separar hijos de sus padres", () => {
+  const rows = categoryTree(categories.filter((c) => c.id !== "local")).options;
+  const index = rows.findIndex((r) => r.category.id === "trip");
+  const before = projectCategoryGap(rows, index, 0);
+  expect(before.drop).toEqual({ targetId: "trip", position: "before" });
+  const inside = projectCategoryGap(rows, index + 1, 1);
+  expect(inside.parentId).toBe("trip");
+  expect(inside.drop).toEqual({ targetId: "transport", position: "before" });
+  // At a gap preceding a child, outdenting would split an existing branch.
+  expect(projectCategoryGap(rows, index + 1, 0).depth).toBe(1);
+  const root = projectCategoryGap(rows, rows.length, 0);
+  expect(root.parentId).toBeUndefined();
+  expect(root.drop).toEqual({ targetId: undefined, position: "inside" });
+  expect(projectCategoryGap(rows, 0, 99).depth).toBe(0);
 });
