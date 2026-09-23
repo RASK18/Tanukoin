@@ -46,6 +46,103 @@ function commit(rows: ReturnType<typeof table>, saved: Movement[] = []) {
 const descriptions = (rows: Movement[], desc = false) =>
   orderMovements(rows, desc).map((m) => m.description);
 
+it("las columnas originales determinan el sentido aunque ambas fechas normalizadas salten", () => {
+  const parsed = readTabular(
+    new TextEncoder().encode(
+      "Fecha de operación;Fecha de valor;Concepto;Importe\n10/09/2026;04/09/2026;A;-1\n09/09/2026;11/09/2026;B;-2\n08/09/2026;08/09/2026;C;-3",
+    ).buffer,
+    "ficticio.csv",
+  );
+  const candidates = prepareImport(parsed, account, [0]).candidates;
+  const result = commit(candidates);
+  expect(descriptions(result.pending)).toEqual(["C", "B", "A"]);
+  expect(orderMovements(result.pending).map((m) => m.date)).toEqual([
+    "2026-09-08",
+    "2026-09-09",
+    "2026-09-04",
+  ]);
+  expect(result.uncertain).toBe(false);
+  expect(descriptions(inferSourceOrder(result.pending))).toEqual([
+    "C",
+    "B",
+    "A",
+  ]);
+  validateMovementOrder(result.pending);
+});
+
+it("Revolut respeta finalización y saldos aunque inicio retroceda", () => {
+  const parsed = readTabular(
+    new TextEncoder().encode(
+      "Tipo,Producto,Fecha de inicio,Fecha de finalización,Descripción,Importe,Comisión,Divisa,State,Saldo\nRecargas,Actual,2026-09-10 12:30:00,2026-09-10 12:30:01,Ingreso,20,0,EUR,COMPLETADO,50\nPago con tarjeta,Actual,2026-09-10 11:30:00,2026-09-11 09:00:00,Compra,-10,0,EUR,COMPLETADO,40",
+    ).buffer,
+    "ficticio.csv",
+  );
+  const result = commit(prepareImport(parsed, account, [0]).candidates);
+  expect(descriptions(result.pending)).toEqual(["Ingreso", "Compra"]);
+  expect(result.uncertain).toBe(false);
+});
+
+it("N26 conserva el salto entre días y no avisa por carecer de saldo", () => {
+  const parsed = readTabular(
+    new TextEncoder().encode(
+      "Booking Date,Value Date,Partner Name,Payment Reference,Amount (EUR)\n2026-09-05,2026-09-05,A,,-1\n2026-09-06,2026-09-04,B,,-2\n2026-09-06,2026-09-06,C,,-3",
+    ).buffer,
+    "ficticio.csv",
+  );
+  const result = commit(prepareImport(parsed, account, [0]).candidates);
+  expect(descriptions(result.pending)).toEqual(["A", "B", "C"]);
+  expect(descriptions(result.pending, true)).toEqual(["C", "B", "A"]);
+  expect(result.uncertain).toBe(false);
+});
+
+it("un enlace exacto une cadenas entre días distintos sin forzar la fecha principal", () => {
+  const initial = commit(
+    table([
+      ["06/09/2026", "A", "10", "10"],
+      ["05/09/2026", "B", "20", "30"],
+    ]),
+  ).pending;
+  // Explicit physical chain: the inconsistent dates are a source issue, not a reason to sort the rows.
+  const result = commit(
+    table(
+      [
+        ["05/09/2026", "B", "20", "30"],
+        ["07/09/2026", "C", "30", "60"],
+      ],
+      initial,
+    ),
+    initial,
+  );
+  const all = [
+    ...initial.filter((m) => !result.updates.some((u) => u.id === m.id)),
+    ...result.updates,
+    ...result.pending,
+  ];
+  expect(descriptions(all)).toEqual(["A", "B", "C"]);
+  expect(result.pending).toHaveLength(1);
+  validateMovementOrder(all);
+});
+
+it("no une periodos sin solapamiento fiable ni cambia la secuencia de cada archivo", () => {
+  const initial = commit(table([["05/09/2026", "A", "10", "10"]])).pending;
+  const result = commit(
+    table(
+      [
+        ["01/09/2026", "B", "20", "20"],
+        ["02/09/2026", "C", "30", "50"],
+      ],
+      initial,
+    ),
+    initial,
+  );
+  expect(descriptions([...result.updates, ...result.pending])).toEqual([
+    "A",
+    "B",
+    "C",
+  ]);
+  expect(result.uncertain).toBe(true);
+});
+
 it.each([false, true])(
   "conserva la secuencia completa y su inversa con CSV invertido=%s",
   (reverse) => {
@@ -60,15 +157,21 @@ it.each([false, true])(
   },
 );
 
-it("las fechas descendentes pueden contener días ordenados de antiguo a reciente", () => {
+it("avisa ante un extracto de sentidos incompatibles sin reconstruir sus días", () => {
   const result = commit(
     table([...sample.slice(3), ...sample.slice(1, 3), sample[0]]),
   );
-  expect(descriptions(result.pending)).toEqual(names);
-  expect(result.uncertain).toBe(false);
+  expect(descriptions(result.pending)).toEqual([
+    names[0],
+    names[2],
+    names[1],
+    names[4],
+    names[3],
+  ]);
+  expect(result.uncertain).toBe(true);
 });
 
-it("las fechas descendentes no inventan precedencia entre operaciones sin saldo del mismo día", () => {
+it("invierte toda la secuencia descendente, incluidos empates sin saldo, sin avisar", () => {
   const result = commit(
     table([
       ["06/09/2026", "Otro día", "1", ""],
@@ -77,12 +180,12 @@ it("las fechas descendentes no inventan precedencia entre operaciones sin saldo 
     ]),
   );
   expect(descriptions(result.pending)).toEqual([
-    "Primero en origen",
     "Segundo en origen",
+    "Primero en origen",
     "Otro día",
   ]);
-  expect(result.uncertain).toBe(true);
-  expect(result.pending.every((m) => !m.order?.after.length)).toBe(true);
+  expect(result.uncertain).toBe(false);
+  expect(result.pending.filter((m) => m.order?.after.length)).toHaveLength(2);
 });
 
 it.each(["xlsx", "xls"] as const)("conserva orden en %s", (bookType) => {
@@ -142,7 +245,7 @@ it("no exige continuidad de saldo entre páginas excluidas", () => {
   };
   const rows = prepareImport(parsed, account, [0, 2]).candidates;
   expect(rows[1].movement.sourcePosition?.previousPosition).toBeUndefined();
-  expect(commit(rows).uncertain).toBe(true);
+  expect(commit(rows).uncertain).toBe(false);
   expect(descriptions(commit(rows).pending)).toEqual(["Uno", "Tres"]);
 });
 
@@ -168,12 +271,12 @@ it("fechas intercaladas no prueban continuidad entre bloques completos", () => {
       ["05/09/2026", "C", "5", "15"],
     ]),
   );
-  expect(descriptions(result.pending)).toEqual(["A", "C", "B"]);
+  expect(descriptions(result.pending)).toEqual(["A", "B", "C"]);
   expect(result.uncertain).toBe(true);
 });
 
 it.each(["", "50"])(
-  "un día sin evidencia suficiente (saldo=%s) mantiene orden provisional",
+  "un día sin horas (saldo=%s) acepta la secuencia del documento",
   (balance) => {
     const result = commit(
       table([
@@ -182,8 +285,8 @@ it.each(["", "50"])(
       ]),
     );
     expect(descriptions(result.pending)).toEqual(["Primero", "Segundo"]);
-    expect(result.uncertain).toBe(true);
-    expect(result.pending.every((m) => m.order?.after.length === 0)).toBe(true);
+    expect(result.uncertain).toBe(false);
+    expect(result.pending[1].order?.after).toEqual([result.pending[0].id]);
   },
 );
 
@@ -324,8 +427,8 @@ it("la corrección de una fila en revisión no reutiliza su evidencia original",
   const rows = table(sample).map((c) => c.movement);
   rows[1].amount = 500;
   const source = inferSourceOrder(rows, new Set([rows[1].id]));
-  expect(source[1].order).toBeUndefined();
-  expect(source.every((m) => !m.order?.after.includes(rows[1].id))).toBe(true);
+  expect(source[1].order?.sourceIssue).toBe(true);
+  expect(descriptions(source)).toEqual(names);
   const result = reconcileMovementOrder([], source, source);
   expect(result.pending[1].order?.uncertain).toBe(true);
 });
@@ -371,7 +474,7 @@ it("no modifica otras cuentas y los filtros conservan la secuencia", () => {
   expect(descriptions(rows.filter((m) => m.description !== names[1]))).toEqual(
     names.filter((n) => n !== names[1]),
   );
-  expect(uncertainOrderGroups(other).size).toBe(2);
+  expect(uncertainOrderGroups(other).size).toBe(1);
 });
 
 it("eliminar un eslabón conserva precedencia sin referencias huérfanas; editar la invalida", () => {
@@ -403,13 +506,20 @@ it("valida relaciones, posiciones, ciclos y procedencia", () => {
       r[1].order!.after = ["missing"];
     },
     (r: Movement[]) => {
-      r[1].order!.after = [r[0].id];
+      r[1].accountId = "otra-cuenta";
     },
     (r: Movement[]) => {
       r[1].order!.after = [r[2].id];
     },
     (r: Movement[]) => {
       r[1].sourcePosition!.row = 0;
+    },
+    (r: Movement[]) => {
+      r[1].sourcePosition!.direction = 0 as 1;
+    },
+    (r: Movement[]) => {
+      r[1].order!.sourceIssue = true;
+      r[1].order!.uncertain = false;
     },
     (r: Movement[]) => {
       r[1].sourcePosition!.previousPosition = r[1].sourcePosition!.position;

@@ -417,7 +417,6 @@ export function ImportDialog({
         ...next[index],
         orderEdited:
           next[index].orderEdited ||
-          movement.date !== next[index].movement.date ||
           movement.amount !== next[index].movement.amount,
         movement,
         ...(fingerprint(next[index].movement) !== movement.fingerprint

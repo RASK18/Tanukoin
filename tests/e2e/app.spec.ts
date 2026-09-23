@@ -138,7 +138,7 @@ test("comisión y cambio: revisión, edición móvil, CSV y copia sin alterar el
   });
 });
 
-test("Revolut: dos horas sin zona, orden, edición móvil, CSV y copia", async ({
+test("Revolut: dos horas sin zona, sentido ambiguo, edición móvil, CSV y copia", async ({
   page,
 }) => {
   await createAccount(page);
@@ -165,15 +165,16 @@ test("Revolut: dos horas sin zona, orden, edición móvil, CSV y copia", async (
     notes: "",
   });
   expect(initial.every((m) => !Object.hasOwn(m, "timestamp"))).toBe(true);
+  expect(initial.every((m) => m.order.uncertain)).toBe(true);
   await page.getByLabel("Ordenar movimientos").selectOption("date-asc");
   await expect(page.locator("tbody .row-title")).toHaveText([
-    "Compra mañana",
     "Compra tarde",
+    "Compra mañana",
   ]);
   await page.reload();
   await expect(page.locator("tbody .row-title")).toHaveText([
-    "Compra tarde",
     "Compra mañana",
+    "Compra tarde",
   ]);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole("button", { name: "Editar Compra tarde" }).click();
@@ -404,7 +405,7 @@ test("fechas menor/mayor e importe original: revisión, edición móvil, exporta
   });
 });
 
-test("orden PDF: días empatados, cambio de diseño, recarga, filtros, exportación y copia", async ({
+test("orden PDF: retroceso de fecha, cambio de diseño, recarga, filtros, exportación y copia", async ({
   page,
 }) => {
   const cell = (x: number, y: number, value: string) =>
@@ -437,7 +438,9 @@ test("orden PDF: días empatados, cambio de diseño, recarga, filtros, exportaci
         const y = 670 - i * 35;
         return [
           cell(43, y, date),
-          ...(second ? [cell(104, y, date)] : []),
+          ...(second
+            ? [cell(104, y, concept === concepts[2] ? "05 sep 2026" : date)]
+            : []),
           cell(second ? 166 : 125, y, concept),
           cell(credit ? 417 : 335, y, amount),
           cell(535, y, balance),
@@ -450,7 +453,7 @@ test("orden PDF: días empatados, cambio de diseño, recarga, filtros, exportaci
       ["05 sep 2026", concepts[1], "100,00", "130,00", true],
     ]),
     pdfPage(true, [
-      ["05 sep 2026", concepts[2], "80,00", "50,00", false],
+      ["04 sep 2026", concepts[2], "80,00", "50,00", false],
       ["09 sep 2026", concepts[3], "300,00", "350,00", true],
       ["09 sep 2026", concepts[4], "300,00", "50,00", false],
     ]),
@@ -533,6 +536,52 @@ test("orden PDF: días empatados, cambio de diseño, recarga, filtros, exportaci
   ).toBe(true);
 });
 
+test("orden de extracto sin saldos: retrocesos entre días, paginación y filtros", async ({
+  page,
+}) => {
+  await createAccount(page);
+  const names = Array.from(
+    { length: 35 },
+    (_, i) => `Operacion ${String(i + 1).padStart(2, "0")}`,
+  );
+  const date = (i: number) =>
+    new Date(Date.UTC(2026, 8, i + 1)).toISOString().slice(0, 10);
+  const content =
+    "Booking Date,Value Date,Partner Name,Payment Reference,Amount (EUR)\n" +
+    names
+      .map((name, i) => `${date(i)},${date(i % 2 ? i - 2 : i)},${name},,-1`)
+      .join("\n");
+  await importFile(page, "secuencia-ficticia.csv", Buffer.from(content));
+  const warning = page.getByText(/No se ha podido confirmar la secuencia/);
+  await expect(warning).not.toBeVisible();
+  await page.getByRole("button", { name: "Revisar movimientos" }).click();
+  await page.getByRole("button", { name: "Importar 35 movimientos" }).click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await expect(page.locator("tbody .row-title")).toHaveText(
+    [...names].reverse().slice(0, 30),
+  );
+  await page.getByRole("button", { name: "Siguiente", exact: true }).click();
+  await expect(page.locator("tbody .row-title")).toHaveText(
+    [...names].reverse().slice(30),
+  );
+  await page.getByLabel("Ordenar movimientos").selectOption("date-asc");
+  await expect(page.locator("tbody .row-title")).toHaveText(names.slice(0, 30));
+  await page.getByLabel("Filtrar movimientos").fill("Operacion 0");
+  await expect(page.locator("tbody .row-title")).toHaveText(names.slice(0, 9));
+  const saved = await storedMovements(page);
+  expect(
+    saved.every((m) => !m.order.uncertain && m.balance === undefined),
+  ).toBe(true);
+  expect(
+    saved.sort((a, b) => a.order.rank - b.order.rank).map((m) => m.description),
+  ).toEqual(names);
+  await page.reload();
+  await expect(page.locator("tbody .row-title")).toHaveText(
+    [...names].reverse().slice(0, 30),
+  );
+  await expect(warning).not.toBeVisible();
+});
+
 test("orden: enlaza archivos sucesivos y revierte cambios previos si falla el guardado", async ({
   page,
 }) => {
@@ -585,7 +634,7 @@ test("orden: enlaza archivos sucesivos y revierte cambios previos si falla el gu
   expect(all.every((m) => !m.order.uncertain)).toBe(true);
 });
 
-test("orden: aviso accesible y presentación estable para un día sin saldos ni horas", async ({
+test("orden: acepta la secuencia de un día sin saldos ni horas sin avisar", async ({
   page,
 }) => {
   await createAccount(page);
@@ -597,19 +646,17 @@ test("orden: aviso accesible y presentación estable para un día sin saldos ni 
     ),
   );
   const warning = page.getByText(
-    "No se ha podido confirmar el orden de algunas operaciones del mismo día. El saldo procede del extracto.",
+    "No se ha podido confirmar la secuencia de algunos extractos o su enlace con otras importaciones. El saldo procede del extracto.",
     { exact: true },
   );
-  await expect(warning).toBeVisible();
+  await expect(warning).not.toBeVisible();
   await page.getByRole("button", { name: "Revisar movimientos" }).click();
   await page.getByRole("button", { name: "Importar 2 movimientos" }).click();
   await expect(page.getByRole("dialog")).not.toBeVisible();
   await page.reload();
-  await expect(warning).toBeVisible();
+  await expect(warning).not.toBeVisible();
   const saved = await storedMovements(page);
-  expect(
-    saved.every((m) => m.order.uncertain && !m.time && !m.order.after.length),
-  ).toBe(true);
+  expect(saved.every((m) => !m.order.uncertain && !m.time)).toBe(true);
   await page.getByLabel("Ordenar movimientos").selectOption("date-asc");
   const labels = await page
     .getByRole("button", { name: /^Editar .* ficticio$/ })

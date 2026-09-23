@@ -83,7 +83,11 @@ export function prepareImport(
         `${sheet.name}: no se han reconocido movimientos. Comprueba esta página o elige otro archivo.`,
       );
   }
-  const ordered = inferSourceOrder(candidates.map((c) => c.movement));
+  const ordered = inferSourceOrder(
+    candidates.map((c) => c.movement),
+    new Set(),
+    new Map(candidates.map((c) => [c.movement.id, c.sourceDates || []])),
+  );
   return {
     candidates: candidates.map((c, i) => ({ ...c, movement: ordered[i] })),
     errors,

@@ -328,10 +328,13 @@ export function Movements({ onImport }: { onImport: () => void }) {
           <select
             aria-label="Ordenar movimientos"
             value={sort}
-            onChange={(e) => setSort(e.target.value)}
+            onChange={(e) => {
+              setSort(e.target.value);
+              setPage(0);
+            }}
           >
-            <option value="date-desc">Más recientes primero</option>
-            <option value="date-asc">Más antiguos primero</option>
+            <option value="date-desc">Extracto: más recientes primero</option>
+            <option value="date-asc">Extracto: más antiguos primero</option>
             <option value="amount">Por importe (sin conversión)</option>
           </select>
         </div>

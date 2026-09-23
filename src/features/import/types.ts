@@ -46,6 +46,8 @@ export interface ParsedFile {
   kind?: "pdf" | "table";
 }
 export interface Candidate {
+  /** Original date columns, used only to recognize document direction before normalization. */
+  sourceDates?: string[];
   orderEdited?: boolean;
   movement: Movement;
   row: number;

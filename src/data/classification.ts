@@ -275,12 +275,8 @@ export async function saveEditedMovement(
             .map((m) => (m.id === next.id ? next : m)),
         );
       if (
-        next.date !== current.date ||
-        next.amount !== current.amount ||
         next.accountId !== current.accountId ||
-        next.currency !== current.currency ||
-        next.balance !== current.balance ||
-        next.time !== current.time
+        next.currency !== current.currency
       ) {
         const detached = detachMovementOrder(all, new Set([next.id]));
         const replacements = new Map(detached.map((m) => [m.id, m]));
@@ -297,7 +293,14 @@ export async function saveEditedMovement(
           ...ordered.updates,
           ...ordered.pending,
         ]);
-      } else await db.movements.put(next);
+      } else {
+        if (
+          next.order &&
+          (next.amount !== current.amount || next.balance !== current.balance)
+        )
+          next.order = { ...next.order, sourceIssue: true, uncertain: true };
+        await db.movements.put(next);
+      }
     },
   );
 }

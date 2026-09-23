@@ -1,11 +1,11 @@
 import type { Movement } from "../data/types";
-import { normalize, timeValue } from "./finance";
+import { normalize } from "./finance";
 
 export const orderWarning =
-  "No se ha podido confirmar el orden de algunas operaciones del mismo día. El saldo procede del extracto.";
+  "No se ha podido confirmar la secuencia de algunos extractos o su enlace con otras importaciones. El saldo procede del extracto.";
 
 export const orderGroup = (m: Movement) =>
-  JSON.stringify([m.accountId, m.currency, m.date]);
+  JSON.stringify([m.accountId, m.currency]);
 
 function groups(movements: Movement[]) {
   const result = new Map<string, Movement[]>();
@@ -21,20 +21,44 @@ function groups(movements: Movement[]) {
 /** The final fallback is stable, but never evidence of the time of an operation. */
 export function compareMovements(a: Movement, b: Movement): number {
   return (
-    a.date.localeCompare(b.date) ||
     a.accountId.localeCompare(b.accountId) ||
     a.currency.localeCompare(b.currency) ||
     (a.order?.rank ?? Number.MAX_SAFE_INTEGER) -
       (b.order?.rank ?? Number.MAX_SAFE_INTEGER) ||
+    a.date.localeCompare(b.date) ||
     a.createdAt.localeCompare(b.createdAt) ||
     a.id.localeCompare(b.id)
   );
 }
 
 export function orderMovements(movements: Movement[], descending = false) {
-  return [...movements].sort((a, b) =>
-    descending ? compareMovements(b, a) : compareMovements(a, b),
-  );
+  // Merge independent account sequences by their next visible date. A global
+  // date sort would break the statement order; a pairwise mixed comparator
+  // (rank within account/date between accounts) would not be transitive.
+  const queues = [...groups(movements).values()].map((rows) => ({
+    rows: rows.sort((a, b) =>
+      descending ? compareMovements(b, a) : compareMovements(a, b),
+    ),
+    index: 0,
+  }));
+  const result: Movement[] = [];
+  while (queues.length) {
+    queues.sort((a, b) => {
+      const left = a.rows[a.index],
+        right = b.rows[b.index];
+      return (
+        (descending
+          ? right.date.localeCompare(left.date)
+          : left.date.localeCompare(right.date)) ||
+        left.accountId.localeCompare(right.accountId) ||
+        left.currency.localeCompare(right.currency)
+      );
+    });
+    const next = queues[0];
+    result.push(next.rows[next.index++]);
+    if (next.index === next.rows.length) queues.shift();
+  }
+  return result;
 }
 
 export function uncertainOrderGroups(movements: Movement[]) {
@@ -83,177 +107,128 @@ function resolve(rows: Movement[], edges: Edges) {
 function ranked(rows: Movement[], edges: Edges, forceUncertain = false) {
   const result = resolve(rows, edges);
   if (result.cycle) throw new Error("Relaciones de orden contradictorias.");
+  const uncertain =
+    result.uncertain ||
+    forceUncertain ||
+    rows.some((row) => row.order?.sourceIssue);
   return result.sorted.map((m, rank) => ({
     ...m,
     order: {
       rank,
       after: [...edges.get(m.id)!],
-      uncertain: result.uncertain || forceUncertain,
+      uncertain,
+      ...(m.order?.sourceIssue ? { sourceIssue: true } : {}),
     },
   }));
 }
 
-function clock(m: Movement) {
-  return timeValue(m.time);
+/** A column establishes direction only if its non-empty values are monotonic. */
+function dateDirections(columns: string[][]) {
+  const directions = new Set<number>();
+  let varied = false;
+  for (const column of columns) {
+    const present = column.filter(Boolean);
+    const values = present.every((value) => value.includes("T"))
+      ? present
+      : present.map((value) => value.slice(0, 10));
+    const changes = values
+      .slice(1)
+      .map((value, i) => Math.sign(value.localeCompare(values[i])))
+      .filter(Boolean);
+    if (changes.length) varied = true;
+    if (changes.length && changes.every((sign) => sign === changes[0]))
+      directions.add(changes[0]);
+  }
+  return { directions, varied };
 }
 
-function balanceEvidence(rows: Movement[]) {
-  let checked = 0,
-    forward = true,
-    reverse = true;
-  for (let i = 1; i < rows.length; i++) {
-    const a = rows[i - 1],
-      b = rows[i];
-    if (
-      a.balance === undefined ||
-      b.balance === undefined ||
-      a.sourcePosition?.position === undefined ||
-      b.sourcePosition?.previousPosition !== a.sourcePosition.position
-    )
-      continue;
-    checked++;
-    forward &&= a.balance + b.amount === b.balance;
-    reverse &&= b.balance + a.amount === a.balance;
-  }
-  return { checked, forward, reverse };
-}
-
-/** Adjacent complete day blocks can distinguish a deposit followed by its full withdrawal. */
-function balanceDirections(
-  physical: Movement[],
-  days: Map<string, Movement[]>,
-) {
-  const choices = new Map(
-    [...days].map(([key, rows]) => {
-      const { checked, forward, reverse } = balanceEvidence(rows);
-      return [
-        key,
-        checked && forward !== reverse ? [forward ? 1 : -1] : [1, -1],
-      ];
-    }),
-  );
-  const physicalIndices = new Map(physical.map((m, i) => [m.id, i]));
-  const chronological = [...days].sort(([, a], [, b]) =>
-    compareMovements(a[0], b[0]),
-  );
-  const constraints: [string, string, [number, number][]][] = [];
-  for (let i = 1; i < chronological.length; i++) {
-    const [ak, a] = chronological[i - 1],
-      [bk, b] = chronological[i];
-    if (a[0].accountId !== b[0].accountId || a[0].currency !== b[0].currency)
-      continue;
-    // Interleaved dates are not adjacent complete day blocks.
-    if (
-      [a, b].some(
-        (rows) =>
-          physicalIndices.get(rows.at(-1)!.id)! -
-            physicalIndices.get(rows[0].id)! +
-            1 !==
-          rows.length,
-      )
-    )
-      continue;
-    const indices = [...a, ...b]
-      .map((m) => physicalIndices.get(m.id)!)
-      .sort((x, y) => x - y);
-    if (
-      indices.at(-1)! - indices[0] + 1 !== indices.length ||
-      indices
-        .slice(1)
-        .some(
-          (index) =>
-            physical[index].sourcePosition?.previousPosition === undefined ||
-            physical[index].sourcePosition?.previousPosition !==
-              physical[index - 1].sourcePosition?.position,
-        )
-    )
-      continue;
-    const permitted: [number, number][] = [];
-    for (const ad of choices.get(ak)!)
-      for (const bd of choices.get(bk)!) {
-        const last = ad > 0 ? a.at(-1)! : a[0],
-          first = bd > 0 ? b[0] : b.at(-1)!;
-        if (
-          last.balance === undefined ||
-          first.balance === undefined ||
-          last.balance + first.amount === first.balance
-        )
-          permitted.push([ad, bd]);
-      }
-    if (permitted.length) constraints.push([ak, bk, permitted]);
-  }
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const [ak, bk, permitted] of constraints) {
-      const a = choices.get(ak)!,
-        b = choices.get(bk)!;
-      const pairs = permitted.filter(
-        ([ad, bd]) => a.includes(ad) && b.includes(bd),
-      );
-      if (!pairs.length) continue; // Inconsistent evidence must not manufacture an orientation.
-      const nextA = a.filter((d) => pairs.some(([ad]) => ad === d));
-      const nextB = b.filter((d) => pairs.some(([, bd]) => bd === d));
-      if (nextA.length !== a.length || nextB.length !== b.length)
-        changed = true;
-      choices.set(ak, nextA);
-      choices.set(bk, nextB);
-    }
-  }
-  return choices;
-}
-
-/** Analyze every candidate before filtering duplicates or deselected rows. */
+/** Preserve the document sequence across dates; evidence selects only whole-file reversal. */
 export function inferSourceOrder(
   movements: Movement[],
   edited = new Set<string>(),
+  originalDates?: Map<string, string[]>,
 ): Movement[] {
-  const physical = movements
-    .filter((m) => !edited.has(m.id))
-    .sort(
+  const result = new Map<string, Movement>();
+  for (const members of groups(movements).values()) {
+    const rows = [...members].sort(
       (a, b) =>
         (a.sourcePosition?.position ?? 0) - (b.sourcePosition?.position ?? 0),
     );
-  const days = groups(physical),
-    balanceChoices = balanceDirections(physical, days);
-  const result = new Map<string, Movement>();
-  for (const [key, rows] of days) {
-    let edges = emptyEdges(rows);
-    const timed = rows
-      .filter((m) => Number.isFinite(clock(m)))
-      .sort((a, b) => clock(a) - clock(b));
-    // Compare only written times inside the same source/account/day, never zones.
-    for (let i = 1; i < timed.length; i++) {
-      if (clock(timed[i - 1]) < clock(timed[i]))
-        for (const previous of timed.filter(
-          (m) => clock(m) === clock(timed[i - 1]),
-        ))
-          for (const next of timed.filter((m) => clock(m) === clock(timed[i])))
-            edges.get(next.id)!.add(previous.id);
+    let checked = 0,
+      forward = true,
+      reverse = true;
+    for (let i = 1; i < rows.length; i++) {
+      const a = rows[i - 1],
+        b = rows[i];
+      if (
+        edited.has(a.id) ||
+        edited.has(b.id) ||
+        a.balance === undefined ||
+        b.balance === undefined ||
+        a.sourcePosition?.position === undefined ||
+        b.sourcePosition?.previousPosition !== a.sourcePosition.position
+      )
+        continue;
+      checked++;
+      forward &&= a.balance + b.amount === b.balance;
+      reverse &&= b.balance + a.amount === a.balance;
     }
-    const { checked, forward, reverse } = balanceEvidence(rows);
-    // Day ordering alone cannot establish the orientation inside a tied day.
-    let direction = 0;
-    let conflict = checked > 0 && !forward && !reverse;
-    if (balanceChoices.get(key)!.length === 1)
-      direction = balanceChoices.get(key)![0];
-    if (conflict) direction = 0;
-    const preferred = direction < 0 ? [...rows].reverse() : rows;
-    if (direction) {
-      const combined = new Map(
-        [...edges].map(([id, after]) => [id, new Set(after)]),
-      );
-      addChain(combined, preferred);
-      if (!resolve(preferred, combined).cycle) edges = combined;
-      else conflict = true;
-    }
-    // A clock/balance contradiction is not reliable precedence. Retain physical
-    // presentation provisionally; empty edges keep that uncertainty after saving.
-    if (conflict) edges = emptyEdges(rows);
-    for (const m of ranked(conflict ? rows : preferred, edges))
-      result.set(m.id, m);
+    const source = rows.map(
+      (m) =>
+        originalDates?.get(m.id) || [
+          m.date + (m.time ? "T" + m.time : ""),
+          m.secondaryDate
+            ? m.secondaryDate + (m.secondaryTime ? "T" + m.secondaryTime : "")
+            : "",
+        ],
+    );
+    const columns = Array.from(
+      {
+        length: source.reduce(
+          (width, dates) => Math.max(width, dates.length),
+          0,
+        ),
+      },
+      (_, i) => source.map((d) => d[i] || ""),
+    );
+    const dates = dateDirections(columns);
+    const hints = new Set(
+      rows.flatMap((m) =>
+        m.sourcePosition?.direction ? [m.sourcePosition.direction] : [],
+      ),
+    );
+    const balanceDirection =
+      checked && forward !== reverse ? (forward ? 1 : -1) : 0;
+    const dateDirection =
+      dates.directions.size === 1 ? [...dates.directions][0] : 0;
+    const direction =
+      hints.size === 1 ? [...hints][0] : balanceDirection || dateDirection || 1;
+    const issue =
+      rows.some((m) => m.order?.sourceIssue || edited.has(m.id)) ||
+      hints.size > 1 ||
+      (hints.size === 0 &&
+        ((dates.directions.size > 1 && !balanceDirection) ||
+          (!balanceDirection && !dateDirection && dates.varied))) ||
+      (!!checked && (direction > 0 ? !forward : !reverse)) ||
+      (hints.size === 0 &&
+        !!balanceDirection &&
+        !!dateDirection &&
+        balanceDirection !== dateDirection);
+    const oriented = (direction < 0 ? [...rows].reverse() : rows).map((m) => ({
+      ...m,
+      sourcePosition: m.sourcePosition
+        ? { ...m.sourcePosition, direction: direction as 1 | -1 }
+        : undefined,
+      order: {
+        ...(m.order || { rank: 0, after: [], uncertain: false }),
+        sourceIssue: issue || undefined,
+      },
+    }));
+    const edges = emptyEdges(oriented);
+    addChain(edges, oriented);
+    for (const m of ranked(oriented, edges)) result.set(m.id, m);
   }
-  return movements.map((m) => result.get(m.id) || { ...m, order: undefined });
+  return movements.map((m) => result.get(m.id)!);
 }
 
 function uniqueAnchor(m: Movement, saved: Movement[]) {
@@ -399,10 +374,18 @@ export function validateMovementOrder(movements: Movement[]) {
         typeof p !== "object" ||
         Object.keys(p).some(
           (k) =>
-            !["sheet", "page", "row", "position", "previousPosition"].includes(
-              k,
-            ),
+            ![
+              "sheet",
+              "page",
+              "row",
+              "position",
+              "previousPosition",
+              "direction",
+            ].includes(k),
         ) ||
+        (p.direction !== undefined &&
+          p.direction !== 1 &&
+          p.direction !== -1) ||
         typeof p.sheet !== "string" ||
         !integer(p.row, 1) ||
         !integer(p.position, 1) ||
@@ -416,7 +399,11 @@ export function validateMovementOrder(movements: Movement[]) {
     if (
       !o ||
       typeof o !== "object" ||
-      Object.keys(o).some((k) => !["rank", "after", "uncertain"].includes(k)) ||
+      Object.keys(o).some(
+        (k) => !["rank", "after", "uncertain", "sourceIssue"].includes(k),
+      ) ||
+      (o.sourceIssue !== undefined && typeof o.sourceIssue !== "boolean") ||
+      (o.sourceIssue === true && !o.uncertain) ||
       !integer(o.rank, 0) ||
       typeof o.uncertain !== "boolean" ||
       !Array.isArray(o.after) ||

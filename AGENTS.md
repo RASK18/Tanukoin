@@ -40,6 +40,7 @@
 - La selección de páginas PDF usa «Todas las páginas» o rangos escritos como `1-29, 35, 40-50`, nunca una lista de checks individuales. La navegación de la vista previa es independiente.
 - Detecta columnas y formatos localmente, sin necesitar modelos. Para casos no reconocidos, ofrece IA local preparada solo a petición expresa del usuario y valida su salida. No descargues modelos automáticamente ni añadas IA remota como alternativa.
 - Prioriza la contraparte explícita del origen; si solo aparece en el concepto, extráela con reglas locales para estructuras reconocibles y deja vacío lo ambiguo. Añade la referencia del pago al concepto con «. », evitando repetirla o confundirla con el nombre.
+- Conserva la secuencia del extracto por cuenta y moneda, también entre fechas distintas. Usa las columnas originales y los saldos contiguos para reconocer su sentido; conserva o invierte la secuencia completa, sin ordenar filas por la fecha principal. La falta de horas o saldos no es por sí sola una incidencia de orden. Avisa de evidencias contradictorias o enlaces ambiguos entre archivos. Editar fechas u horas no cambia la posición original.
 - Compara duplicados solo con movimientos ya guardados en la misma cuenta, nunca entre filas o páginas del archivo que se está importando.
 - La comparación por contenido considera fecha, importe, concepto y saldo. Saldos distintos distinguen operaciones legítimas repetidas.
 - Si falta el saldo en cualquiera de las partes, muestra la incertidumbre y conserva la fila seleccionada para revisión. No inventes saldos históricos.

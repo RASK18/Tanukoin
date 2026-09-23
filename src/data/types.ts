@@ -44,8 +44,14 @@ export interface Movement {
     row: number;
     position: number;
     previousPosition?: number;
+    direction?: 1 | -1;
   };
-  order?: { rank: number; after: string[]; uncertain: boolean };
+  order?: {
+    rank: number;
+    after: string[];
+    uncertain: boolean;
+    sourceIssue?: boolean;
+  };
   categoryId?: string;
   tagIds: string[];
   categorySource: CategorySource;

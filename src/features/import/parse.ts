@@ -216,7 +216,31 @@ export function buildCandidates(
       validateOriginalAmount(m);
       validateMovementCosts(m);
       m.fingerprint = fingerprint(m);
-      candidates.push({ movement: m, row: rowNumber, ...duplicateOfSaved(m) });
+      const sourceDates = [
+        c.date,
+        c.valueDate,
+        c.bookingDate,
+        c.completionDate,
+        c.secondaryDate,
+      ].map((index) => {
+        if (!cell(index)) return "";
+        const value = sourceDateTime(
+          cell(index),
+          profile.dateFormat,
+          index === c.secondaryDate
+            ? cell(c.secondaryTime)
+            : index === c.date
+              ? cell(c.time)
+              : "",
+        );
+        return value.date + (value.time ? `T${value.time}` : "");
+      });
+      candidates.push({
+        movement: m,
+        row: rowNumber,
+        sourceDates,
+        ...duplicateOfSaved(m),
+      });
     } catch (error) {
       errors.push(
         `Fila ${rowNumber}: ${error instanceof Error ? error.message : "Dato no válido"}`,

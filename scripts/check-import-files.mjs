@@ -175,7 +175,7 @@ try {
           const byId = new Map(movements.map((m) => [m.id, m]));
           const groups = new Map();
           for (const m of movements) {
-            const key = JSON.stringify([m.accountId, m.currency, m.date]);
+            const key = JSON.stringify([m.accountId, m.currency]);
             groups.set(key, [...(groups.get(key) || []), m]);
           }
           const orderValid = [...groups.values()].every((rows) => {
@@ -185,11 +185,16 @@ try {
                 m.order &&
                 m.order.rank === i &&
                 m.sourcePosition &&
+                [1, -1].includes(m.sourcePosition.direction) &&
+                (i === 0 ||
+                  (m.sourcePosition.position -
+                    rows[i - 1].sourcePosition.position) *
+                    m.sourcePosition.direction >
+                    0) &&
                 m.order.after.every((id) => {
                   const before = byId.get(id);
                   return (
                     before &&
-                    before.date === m.date &&
                     before.accountId === m.accountId &&
                     before.currency === m.currency &&
                     before.order.rank < m.order.rank
@@ -210,10 +215,10 @@ try {
           });
           movements.sort(
             (a, b) =>
-              b.date.localeCompare(a.date) ||
               b.accountId.localeCompare(a.accountId) ||
               b.currency.localeCompare(a.currency) ||
               b.order.rank - a.order.rank ||
+              b.date.localeCompare(a.date) ||
               b.createdAt.localeCompare(a.createdAt) ||
               b.id.localeCompare(a.id),
           );

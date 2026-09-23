@@ -107,7 +107,7 @@ it("editar datos originales y la fecha secundaria conserva el orden y valida ant
   expect(await db.movements.get(original.id)).toEqual(saved);
 });
 
-it("editar hora principal invalida orden; la secundaria lo conserva y requiere su fecha", async () => {
+it("editar horas conserva la secuencia; la secundaria requiere su fecha", async () => {
   const m = orderMovements(await db.movements.toArray())[1];
   await saveEditedMovement(
     { ...m, secondaryDate: "2026-09-06", secondaryTime: "10:11:12" },
@@ -122,14 +122,13 @@ it("editar hora principal invalida orden; la secundaria lo conserva y requiere s
   await saveEditedMovement({ ...secondary, time: "08:00:00" }, false, []);
   const saved = (await db.movements.get(m.id))!;
   expect(saved.time).toBe("08:00:00");
-  expect(saved.order?.uncertain).toBe(true);
-  expect(saved.order?.after).toEqual([]);
+  expect(saved.order).toEqual(m.order);
 });
 
 it.each([
   "dangling",
   "cycle",
-  "otherDate",
+  "otherCurrency",
   "otherAccount",
   "rank",
   "provenance",
@@ -138,7 +137,7 @@ it.each([
   const rows = orderMovements(backup.data.movements);
   if (kind === "dangling") rows[1].order!.after = ["not-present"];
   if (kind === "cycle") rows[0].order!.after = [rows[2].id];
-  if (kind === "otherDate") rows[1].date = "2026-09-06";
+  if (kind === "otherCurrency") rows[1].currency = "USD";
   if (kind === "otherAccount") {
     backup.data.accounts.push({ ...account, id: "b" });
     rows[1].accountId = "b";
@@ -150,7 +149,7 @@ it.each([
   validateMovementOrder(await db.movements.toArray());
 });
 
-it("editar notas o categorías conserva el orden; cambiar fecha invalida referencias", async () => {
+it("editar notas, categorías o fechas conserva el orden del extracto", async () => {
   const original = orderMovements(await db.movements.toArray());
   await saveEditedMovement(
     { ...original[1], notes: "Nota ficticia" },
@@ -163,15 +162,15 @@ it("editar notas o categorías conserva el orden; cambiar fecha invalida referen
   await saveEditedMovement({ ...original[1], date: "2026-09-06" }, false, []);
   const rows = await db.movements.toArray();
   validateMovementOrder(rows);
-  expect(rows.every((m) => !m.order?.after.includes(original[1].id))).toBe(
-    true,
+  expect(rows.find((m) => m.id === original[1].id)?.order).toEqual(
+    original[1].order,
   );
   expect(orderMovements(rows).map((m) => m.description)).toEqual([
     "A",
-    "C",
     "B",
+    "C",
   ]);
-  expect(uncertainOrderGroups(rows).size).toBe(1);
+  expect(uncertainOrderGroups(rows).size).toBe(0);
 });
 
 it("cambiar importe invalida evidencia y eliminar contrae las relaciones válidas", async () => {
@@ -190,17 +189,17 @@ it("cambiar importe invalida evidencia y eliminar contrae las relaciones válida
 
 it("un fallo de escritura revierte también la invalidación del orden", async () => {
   const original = orderMovements(await db.movements.toArray());
-  const put = db.movements.bulkPut.bind(db.movements);
-  db.movements.bulkPut = (async (...args: Parameters<typeof put>) => {
+  const put = db.movements.put.bind(db.movements);
+  db.movements.put = (async (...args: Parameters<typeof put>) => {
     await put(...args);
     throw new Error("Fallo ficticio");
-  }) as unknown as typeof db.movements.bulkPut;
+  }) as unknown as typeof db.movements.put;
   try {
     await expect(
-      saveEditedMovement({ ...original[1], date: "2026-09-06" }, false, []),
+      saveEditedMovement({ ...original[1], amount: 999 }, false, []),
     ).rejects.toThrow("Fallo ficticio");
   } finally {
-    db.movements.bulkPut = put;
+    db.movements.put = put;
   }
   expect(orderMovements(await db.movements.toArray())).toEqual(original);
 });
