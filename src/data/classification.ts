@@ -5,7 +5,19 @@ import {
   makeTag,
   validateCategoryTree,
 } from "../lib/classification";
-import { normalize, validateRelation } from "../lib/finance";
+import {
+  normalize,
+  validateRelation,
+  validateOriginalAmount,
+  validateMovementCosts,
+  validateMovementDates,
+  fingerprint,
+} from "../lib/finance";
+import { sanitizeMovementText } from "../lib/movement-text";
+import {
+  detachMovementOrder,
+  reconcileMovementOrder,
+} from "../lib/movement-order";
 
 export async function saveCategory(category: Category, creating = false) {
   await db.transaction("rw", db.categories, async () => {
@@ -216,12 +228,19 @@ export async function saveEditedMovement(
       if (!current) throw new Error("El movimiento ya no existe.");
       const next = {
         ...movement,
+        ...sanitizeMovementText(movement),
+        order: current.order,
+        sourcePosition: current.sourcePosition,
         categoryId: categoryChanged ? movement.categoryId : current.categoryId,
         categorySource: categoryChanged
           ? ("manual" as const)
           : current.categorySource,
         aiSuggestion: categoryChanged ? undefined : current.aiSuggestion,
       };
+      validateOriginalAmount(next);
+      validateMovementCosts(next);
+      validateMovementDates(next);
+      next.fingerprint = fingerprint(next);
       if (next.categoryId && !(await db.categories.get(next.categoryId)))
         throw new Error("La categoría ya no existe. Elige otra categoría.");
       const resolved: string[] = [];
@@ -255,7 +274,30 @@ export async function saveEditedMovement(
             .filter((m) => relation.movementIds.includes(m.id))
             .map((m) => (m.id === next.id ? next : m)),
         );
-      await db.movements.put(next);
+      if (
+        next.date !== current.date ||
+        next.amount !== current.amount ||
+        next.accountId !== current.accountId ||
+        next.currency !== current.currency ||
+        next.balance !== current.balance ||
+        next.time !== current.time
+      ) {
+        const detached = detachMovementOrder(all, new Set([next.id]));
+        const replacements = new Map(detached.map((m) => [m.id, m]));
+        const saved = all
+          .filter((m) => m.id !== next.id)
+          .map((m) => replacements.get(m.id) || m);
+        const ordered = reconcileMovementOrder(
+          saved,
+          [{ ...next, order: undefined }],
+          [],
+        );
+        await db.movements.bulkPut([
+          ...detached.filter((m) => m.id !== next.id),
+          ...ordered.updates,
+          ...ordered.pending,
+        ]);
+      } else await db.movements.put(next);
     },
   );
 }

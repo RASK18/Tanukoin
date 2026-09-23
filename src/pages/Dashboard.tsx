@@ -1,4 +1,5 @@
 import { categoryTree, matchesTags, type TagMode } from "../lib/classification";
+import { orderMovements } from "../lib/movement-order";
 import {
   CategorySelect,
   TagFilter,
@@ -139,11 +140,10 @@ export function Dashboard({ onImport }: { onImport: () => void }) {
     (sum, r) => sum + Math.abs(r.amount),
     0,
   );
-  const recent = data.movements
+  const recent = orderMovements(data.movements, true)
     .filter(
       (m) => m.date.startsWith(month) && m.currency === currency && matches(m),
     )
-    .sort((a, b) => b.date.localeCompare(a.date))
     .slice(0, 5);
   return (
     <>

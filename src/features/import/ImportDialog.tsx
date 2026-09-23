@@ -19,12 +19,19 @@ import {
   fingerprint,
   parseAmount,
   parseDate,
+  validateMovementDates,
 } from "../../lib/finance";
 import { useApp, Modal, Field, AccountSelect } from "../../components/ui";
 import { buildCandidates, duplicateChecker } from "./parse";
 import { prepareImport } from "./prepare";
 import { parsePageRanges } from "./page-ranges";
 import { AccountDialog } from "../../components/AccountDialog";
+import { sanitizeMovementText } from "../../lib/movement-text";
+import {
+  inferSourceOrder,
+  reconcileMovementOrder,
+  orderWarning,
+} from "../../lib/movement-order";
 import {
   detectImport,
   detectionPrompt,
@@ -192,6 +199,21 @@ export function ImportDialog({
     [parsed, previewAccount, previewSheet, overrides, data.movements, prepared],
   );
   const issues = review ? errors : [...errors, ...(prepared?.errors || [])];
+  const orderPreview = useMemo(() => {
+    const rows = review ? candidates : prepared?.candidates || [];
+    const source = inferSourceOrder(
+      rows.map((c) => c.movement),
+      new Set(rows.filter((c) => c.orderEdited).map((c) => c.movement.id)),
+    );
+    const included = new Set(
+      rows.filter((c) => c.selected).map((c) => c.movement.id),
+    );
+    return reconcileMovementOrder(
+      data.movements,
+      source.filter((m) => included.has(m.id)),
+      source,
+    );
+  }, [review, candidates, prepared, data.movements]);
   function preview() {
     if (
       !target ||
@@ -265,18 +287,29 @@ export function ImportDialog({
     setLoading(true);
     setSaving({ phase: "Preparando movimientos" });
     const importId = crypto.randomUUID();
+    let orderUncertain = false;
     const success = await run(
       (async () => {
         await new Promise((resolve) => setTimeout(resolve, 0));
-        const selected = candidates.filter(
-          (c) => c.selected && c.duplicate !== "exact",
+        const source = inferSourceOrder(
+          candidates.map((c) => c.movement),
+          new Set(
+            candidates.filter((c) => c.orderEdited).map((c) => c.movement.id),
+          ),
         );
+        const inferred = new Map(source.map((m) => [m.id, m]));
+        const selected = candidates.filter((c) => c.selected);
         let prepared: Movement[] = [];
         for (let i = 0; i < selected.length; i += 250) {
           prepared.push(
             ...selected
               .slice(i, i + 250)
-              .map((c) => applyRules({ ...c.movement, importId }, data.rules)),
+              .map((c) =>
+                applyRules(
+                  { ...inferred.get(c.movement.id)!, importId },
+                  data.rules,
+                ),
+              ),
           );
           setSaving({
             phase: "Aplicando reglas",
@@ -306,7 +339,7 @@ export function ImportDialog({
             );
           }
         }
-        setSaving({ phase: "Comprobando identificadores bancarios" });
+        setSaving({ phase: "Comprobando movimientos" });
         await db.transaction(
           "rw",
           [db.movements, db.categories, db.accounts],
@@ -328,23 +361,19 @@ export function ImportDialog({
             prepared = prepared.map((m) =>
               validAutomaticCategory(m, categories),
             );
-            const savedExternal = new Set(
-              (await db.movements.toArray())
-                .filter((m) => m.externalId)
-                .map((m) => JSON.stringify([m.accountId, m.externalId])),
-            );
-            const pending = prepared.filter(
-              (m) =>
-                !m.externalId ||
-                !savedExternal.has(JSON.stringify([m.accountId, m.externalId])),
-            );
+            const saved = await db.movements.toArray();
+            const pending = prepared;
+            const ordered = reconcileMovementOrder(saved, pending, source);
+            orderUncertain = ordered.uncertain;
+            if (ordered.updates.length)
+              await db.movements.bulkPut(ordered.updates);
             setSaving({
               phase: "Guardando movimientos",
               done: 0,
               total: pending.length,
             });
             for (let i = 0; i < pending.length; i += 250) {
-              await db.movements.bulkAdd(pending.slice(i, i + 250));
+              await db.movements.bulkAdd(ordered.pending.slice(i, i + 250));
               setSaving({
                 phase: "Guardando movimientos",
                 done: Math.min(i + 250, pending.length),
@@ -360,7 +389,10 @@ export function ImportDialog({
     savingRef.current = false;
     setSaving(undefined);
     setSaveFailed(!success);
-    if (success) onClose();
+    if (success) {
+      if (orderUncertain) notify(orderWarning);
+      onClose();
+    }
   }
   function editCandidate(
     index: number,
@@ -372,14 +404,21 @@ export function ImportDialog({
       const movement = { ...next[index].movement };
       if (key === "amount")
         movement.amount = parseAmount(value, ",", movement.currency);
-      else if (key === "date") movement.date = parseDate(value, "YMD");
-      else {
+      else if (key === "date") {
+        movement.date = parseDate(value, "YMD");
+      } else {
         if (!value.trim()) throw new Error("Falta el concepto");
         movement.description = value;
       }
+      validateMovementDates(movement);
+      Object.assign(movement, sanitizeMovementText(movement));
       movement.fingerprint = fingerprint(movement);
       next[index] = {
         ...next[index],
+        orderEdited:
+          next[index].orderEdited ||
+          movement.date !== next[index].movement.date ||
+          movement.amount !== next[index].movement.amount,
         movement,
         ...(fingerprint(next[index].movement) !== movement.fingerprint
           ? {
@@ -619,7 +658,7 @@ export function ImportDialog({
                   <table>
                     <thead>
                       <tr>
-                        <th>Fecha</th>
+                        <th>Fecha principal</th>
                         <th>Concepto</th>
                         <th>Importe</th>
                         <th>Saldo</th>
@@ -628,10 +667,45 @@ export function ImportDialog({
                     <tbody>
                       {shown?.candidates.slice(0, 6).map((c) => (
                         <tr key={c.movement.id}>
-                          <td>{c.movement.date}</td>
+                          <td>
+                            {c.movement.date}
+                            {c.movement.time && (
+                              <small>Hora: {c.movement.time}</small>
+                            )}
+                            {c.movement.secondaryDate && (
+                              <small>
+                                Secundaria: {c.movement.secondaryDate}
+                                {c.movement.secondaryTime
+                                  ? ` · ${c.movement.secondaryTime}`
+                                  : ""}
+                              </small>
+                            )}
+                          </td>
                           <td>{c.movement.description}</td>
                           <td>
                             {money(c.movement.amount, c.movement.currency)}
+                            {c.movement.fee !== undefined && (
+                              <small>
+                                Comisión:{" "}
+                                {money(c.movement.fee, c.movement.currency)}
+                              </small>
+                            )}
+                            {c.movement.exchangeRate && (
+                              <small>
+                                Tipo de cambio aplicado:{" "}
+                                {c.movement.exchangeRate}
+                              </small>
+                            )}
+                            {c.movement.originalAmount !== undefined &&
+                              c.movement.originalCurrency && (
+                                <small>
+                                  Original:{" "}
+                                  {money(
+                                    c.movement.originalAmount,
+                                    c.movement.originalCurrency,
+                                  )}
+                                </small>
+                              )}
                           </td>
                           <td>
                             {c.movement.balance === undefined
@@ -729,6 +803,11 @@ export function ImportDialog({
           )}
         </div>
       )}
+      {orderPreview.uncertain && !saving && (
+        <p className="notice" role="status">
+          {orderWarning}
+        </p>
+      )}
       {issues.length > 0 && !saving && (
         <details className="notice warning" open>
           <summary>
@@ -780,7 +859,7 @@ export function ImportDialog({
               <thead>
                 <tr>
                   <th>Incluir</th>
-                  <th>Fecha</th>
+                  <th>Fecha principal</th>
                   <th>Concepto</th>
                   <th>Importe</th>
                   <th>Saldo</th>
@@ -798,7 +877,6 @@ export function ImportDialog({
                           <input
                             aria-label={`Incluir fila ${c.row}${c.page ? ` de la página ${c.page}` : ""}`}
                             type="checkbox"
-                            disabled={c.duplicate === "exact"}
                             checked={c.selected}
                             onChange={(e) =>
                               setCandidates(
@@ -821,6 +899,17 @@ export function ImportDialog({
                               editCandidate(i, "date", e.target.value)
                             }
                           />
+                          {c.movement.time && (
+                            <small>Hora: {c.movement.time}</small>
+                          )}
+                          {c.movement.secondaryDate && (
+                            <small>
+                              Secundaria: {c.movement.secondaryDate}
+                              {c.movement.secondaryTime
+                                ? ` · ${c.movement.secondaryTime}`
+                                : ""}
+                            </small>
+                          )}
                         </td>
                         <td>
                           <input
@@ -843,6 +932,27 @@ export function ImportDialog({
                               editCandidate(i, "amount", e.target.value)
                             }
                           />
+                          {c.movement.fee !== undefined && (
+                            <small>
+                              Comisión:{" "}
+                              {money(c.movement.fee, c.movement.currency)}
+                            </small>
+                          )}
+                          {c.movement.exchangeRate && (
+                            <small>
+                              Tipo de cambio aplicado: {c.movement.exchangeRate}
+                            </small>
+                          )}
+                          {c.movement.originalAmount !== undefined &&
+                            c.movement.originalCurrency && (
+                              <small>
+                                Original:{" "}
+                                {money(
+                                  c.movement.originalAmount,
+                                  c.movement.originalCurrency,
+                                )}
+                              </small>
+                            )}
                         </td>
                         <td>
                           {c.movement.balance === undefined
@@ -850,13 +960,11 @@ export function ImportDialog({
                             : money(c.movement.balance, c.movement.currency)}
                         </td>
                         <td>
-                          {c.duplicate === "exact"
-                            ? "Ya importado"
-                            : c.duplicate === "possible"
-                              ? c.balanceMissing
-                                ? "Revisar coincidencia: falta saldo"
-                                : "Posible duplicado"
-                              : "Nuevo"}
+                          {c.duplicate === "possible"
+                            ? c.balanceMissing
+                              ? "Revisar coincidencia: falta saldo"
+                              : "Posible duplicado"
+                            : "Nuevo"}
                         </td>
                       </tr>
                     );

@@ -30,6 +30,22 @@ const movement = (
   ...extra,
 });
 describe("importes y fechas", () => {
+  it("las notas de reglas tampoco incorporan IBAN a los movimientos", () => {
+    const m = movement("p", -100);
+    expect(
+      applyRules(m, [
+        {
+          id: "r",
+          name: "Regla ficticia",
+          enabled: true,
+          priority: 1,
+          descriptionContains: "",
+          merchantContains: "",
+          note: "Nota de prueba. IBAN: ES00" + "0".repeat(20),
+        },
+      ]).notes,
+    ).toBe("Nota de prueba.");
+  });
   it("interpreta separadores, signo y monedas sin decimales", () => {
     expect(parseAmount("1.234,56 €", ",")).toBe(123456);
     expect(parseAmount("(12,30)", ",")).toBe(-1230);

@@ -1,6 +1,12 @@
 import { db } from "../../data/db";
 import type { Account, Movement } from "../../data/types";
-import { fingerprint, parseAmount, parseDate } from "../../lib/finance";
+import {
+  fingerprint,
+  parseAmount,
+  sourceDateTime,
+  movementDateRange,
+} from "../../lib/finance";
+import { normalizeImportedText } from "../../lib/movement-text";
 export interface Bank {
   name: string;
   country: string;
@@ -266,17 +272,22 @@ export function normalizeBankTransactions(
       const currency = r.transaction_amount?.currency || account.currency;
       if (currency !== account.currency)
         throw new Error("El banco devolvió una moneda distinta a la cuenta.");
-      const description = Array.isArray(r.remittance_information)
+      const reference = Array.isArray(r.remittance_information)
         ? r.remittance_information.join(" ")
-        : String(
-            r.remittance_information ||
-              r.creditor?.name ||
-              r.debtor?.name ||
-              "Movimiento bancario",
-          );
-      const timestamp = r.transaction_date?.includes("T")
-        ? r.transaction_date
-        : undefined;
+        : String(r.remittance_information || "");
+      const merchant =
+        r.credit_debit_indicator === "DBIT" ? r.creditor?.name : r.debtor?.name;
+      const text = normalizeImportedText({
+        description: "",
+        merchant: merchant || "",
+        reference,
+        fallback: "Movimiento bancario",
+      });
+      const dates = [r.transaction_date, r.booking_date, r.value_date]
+        .filter(Boolean)
+        .map((raw) => sourceDateTime(raw, "YMD"));
+      if (!dates.length)
+        throw new Error("El banco devolvió un movimiento sin fecha.");
       const m: Movement = {
         id: crypto.randomUUID(),
         accountId: account.id,
@@ -284,21 +295,13 @@ export function normalizeBankTransactions(
           Math.abs(parseAmount(r.transaction_amount?.amount, ".", currency)) *
           (r.credit_debit_indicator === "DBIT" ? -1 : 1),
         currency,
-        description,
-        merchant: r.creditor?.name || r.debtor?.name || "",
-        date: parseDate(
-          r.transaction_date || r.booking_date || r.value_date,
-          "YMD",
-        ),
-        bookingDate: r.booking_date
-          ? parseDate(r.booking_date, "YMD")
-          : undefined,
-        timestamp,
+        description: text.description,
+        merchant: text.merchant,
+        ...movementDateRange(dates),
         categorySource: "none",
         tagIds: [],
-        notes: "",
+        notes: text.notes,
         source: "Enable Banking",
-        externalId: r.entry_reference || r.transaction_id || undefined,
         fingerprint: "",
         createdAt: new Date().toISOString(),
       };

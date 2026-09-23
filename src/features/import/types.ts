@@ -7,17 +7,23 @@ export interface DetectedLayout {
   currency?: string;
   columns: {
     date: number;
+    time?: number;
+    secondaryTime?: number;
     description: number;
     amount: number;
     debit: number;
     credit: number;
     merchant: number;
-    externalId: number;
     balance?: number;
     currency?: number;
     valueDate?: number;
     bookingDate?: number;
+    completionDate?: number;
+    secondaryDate?: number;
+    originalAmount?: number;
+    originalCurrency?: number;
     fee?: number;
+    exchangeRate?: number;
     status?: number;
     reference?: number;
     type?: number;
@@ -40,9 +46,10 @@ export interface ParsedFile {
   kind?: "pdf" | "table";
 }
 export interface Candidate {
+  orderEdited?: boolean;
   movement: Movement;
   row: number;
-  duplicate: "none" | "possible" | "exact";
+  duplicate: "none" | "possible";
   selected: boolean;
   balanceMissing?: boolean;
   page?: number;

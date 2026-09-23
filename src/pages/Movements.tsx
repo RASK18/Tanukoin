@@ -40,12 +40,21 @@ import {
   displayDate,
   normalize,
   parseAmount,
+  parseTime,
+  parseExchangeRate,
   fingerprint,
   validateRelation,
   currencyDigits,
 } from "../lib/finance";
 import { csvCell, download } from "../lib/backup";
 import { semanticSearch } from "../features/ai/client";
+import {
+  compareMovements,
+  orderMovements,
+  orderGroup,
+  orderWarning,
+  uncertainOrderGroups,
+} from "../lib/movement-order";
 export function Movements({ onImport }: { onImport: () => void }) {
   const { data, run, notify } = useApp();
   const [params] = useSearchParams();
@@ -79,7 +88,7 @@ export function Movements({ onImport }: { onImport: () => void }) {
   const categoryIds = useMemo(() => tree.branch(category), [tree, category]);
   const rows = useMemo(
     () =>
-      data.movements
+      orderMovements(data.movements, sort !== "date-asc")
         .filter(
           (m) =>
             (semanticIds
@@ -99,11 +108,7 @@ export function Movements({ onImport }: { onImport: () => void }) {
             (!currency || m.currency === currency),
         )
         .sort((a, b) =>
-          sort === "amount"
-            ? a.amount - b.amount
-            : sort === "date-asc"
-              ? a.date.localeCompare(b.date)
-              : b.date.localeCompare(a.date),
+          sort === "amount" ? a.amount - b.amount || compareMovements(b, a) : 0,
         ),
     [
       data,
@@ -122,6 +127,10 @@ export function Movements({ onImport }: { onImport: () => void }) {
     ],
   );
   const visible = rows.slice(page * 30, page * 30 + 30);
+  const uncertainGroups = useMemo(
+    () => uncertainOrderGroups(data.movements),
+    [data.movements],
+  );
   async function link() {
     try {
       const members = data.movements.filter((m) => selected.includes(m.id));
@@ -153,9 +162,9 @@ export function Movements({ onImport }: { onImport: () => void }) {
   function exportCsv() {
     const content = [
       [
-        "Fecha",
+        "Fecha principal",
         "Concepto",
-        "Comercio",
+        "Contraparte",
         "Importe",
         "Moneda",
         "Cuenta",
@@ -163,6 +172,13 @@ export function Movements({ onImport }: { onImport: () => void }) {
         "Notas",
         "Saldo",
         "Etiquetas",
+        "Fecha secundaria",
+        "Importe original",
+        "Moneda original",
+        "Hora principal",
+        "Hora secundaria",
+        "Comisión",
+        "Tipo de cambio aplicado",
       ],
       ...rows.map((m) => [
         m.date,
@@ -184,6 +200,21 @@ export function Movements({ onImport }: { onImport: () => void }) {
           .map((id) => data.tags.find((t) => t.id === id)?.name)
           .filter(Boolean)
           .join(" | "),
+        m.secondaryDate || "",
+        m.originalAmount === undefined || !m.originalCurrency
+          ? ""
+          : (m.originalAmount / 10 ** currencyDigits(m.originalCurrency))
+              .toFixed(currencyDigits(m.originalCurrency))
+              .replace(".", ","),
+        m.originalCurrency || "",
+        m.time || "",
+        m.secondaryTime || "",
+        m.fee === undefined
+          ? ""
+          : (m.fee / 10 ** currencyDigits(m.currency))
+              .toFixed(currencyDigits(m.currency))
+              .replace(".", ","),
+        m.exchangeRate || "",
       ]),
     ]
       .map((row) => row.map(csvCell).join(";"))
@@ -389,6 +420,11 @@ export function Movements({ onImport }: { onImport: () => void }) {
             </button>
           </div>
         )}
+        {rows.some((m) => uncertainGroups.has(orderGroup(m))) && (
+          <p className="notice" role="status">
+            {orderWarning}
+          </p>
+        )}
         {rows.length ? (
           <>
             <div className="table-scroll">
@@ -419,7 +455,7 @@ export function Movements({ onImport }: { onImport: () => void }) {
                         }
                       />
                     </th>
-                    <th>Fecha</th>
+                    <th>Fecha principal</th>
                     <th>Movimiento</th>
                     <th>Categoría</th>
                     <th>Cuenta</th>
@@ -450,7 +486,10 @@ export function Movements({ onImport }: { onImport: () => void }) {
                           }
                         />
                       </td>
-                      <td className="nowrap">{displayDate(m.date)}</td>
+                      <td className="nowrap">
+                        {displayDate(m.date)}
+                        {m.time && <small>{m.time}</small>}
+                      </td>
                       <td>
                         <strong className="row-title">
                           {m.merchant || m.description}
@@ -587,6 +626,21 @@ function MovementEditor({
   const [categoryChanged, setCategoryChanged] = useState(false);
   const [pendingTags, setPendingTags] = useState<Tag[]>([]);
   const [saveError, setSaveError] = useState("");
+  const [fee, setFee] = useState(
+    m.fee === undefined
+      ? ""
+      : (m.fee / 10 ** currencyDigits(m.currency))
+          .toFixed(currencyDigits(m.currency))
+          .replace(".", ","),
+  );
+  const [exchangeRate, setExchangeRate] = useState(m.exchangeRate || "");
+  const [originalAmount, setOriginalAmount] = useState(
+    m.originalAmount === undefined || !m.originalCurrency
+      ? ""
+      : (m.originalAmount / 10 ** currencyDigits(m.originalCurrency))
+          .toFixed(currencyDigits(m.originalCurrency))
+          .replace(".", ","),
+  );
   const [amount, setAmount] = useState(
     (m.amount / 10 ** currencyDigits(m.currency))
       .toFixed(currencyDigits(m.currency))
@@ -608,6 +662,11 @@ function MovementEditor({
             const next = {
               ...m,
               amount: parseAmount(amount, ",", m.currency),
+              fee: fee.trim() ? parseAmount(fee, ",", m.currency) : undefined,
+              exchangeRate: parseExchangeRate(exchangeRate),
+              originalAmount: originalAmount.trim()
+                ? parseAmount(originalAmount, ",", m.originalCurrency || "EUR")
+                : undefined,
             };
             next.fingerprint = fingerprint(next);
             if (
@@ -630,13 +689,43 @@ function MovementEditor({
         }}
       >
         <div className="form-grid">
-          <Field label="Fecha">
+          <Field label="Fecha principal">
             <input
               type="date"
               required
               value={m.date}
+              onChange={(e) => setM({ ...m, date: e.target.value })}
+            />
+          </Field>
+          <Field label="Fecha secundaria">
+            <input
+              type="date"
+              value={m.secondaryDate || ""}
               onChange={(e) =>
-                setM({ ...m, date: e.target.value, timestamp: undefined })
+                setM({
+                  ...m,
+                  secondaryDate: e.target.value || undefined,
+                  secondaryTime: e.target.value ? m.secondaryTime : undefined,
+                })
+              }
+            />
+          </Field>
+          <Field label="Hora principal">
+            <input
+              type="time"
+              step="any"
+              value={m.time || ""}
+              onChange={(e) => setM({ ...m, time: parseTime(e.target.value) })}
+            />
+          </Field>
+          <Field label="Hora secundaria">
+            <input
+              type="time"
+              step="any"
+              disabled={!m.secondaryDate}
+              value={m.secondaryTime || ""}
+              onChange={(e) =>
+                setM({ ...m, secondaryTime: parseTime(e.target.value) })
               }
             />
           </Field>
@@ -647,6 +736,51 @@ function MovementEditor({
               onChange={(e) => setAmount(e.target.value)}
             />
           </Field>
+          <Field label={`Comisión · ${m.currency}`}>
+            <input
+              aria-label={`Comisión · ${m.currency}`}
+              aria-describedby="movement-fee-help"
+              inputMode="decimal"
+              value={fee}
+              onChange={(e) => setFee(e.target.value)}
+            />
+            <small id="movement-fee-help">
+              Incluida en el importe. Editarla no cambia el importe neto.
+            </small>
+          </Field>
+          <Field label="Tipo de cambio aplicado">
+            <input
+              aria-label="Tipo de cambio aplicado"
+              aria-describedby="movement-exchange-rate-help"
+              value={exchangeRate}
+              onChange={(e) => setExchangeRate(e.target.value)}
+              placeholder="0,85 o 1 EUR = 0,85 GBP"
+            />
+            <small id="movement-exchange-rate-help">
+              Tal como figura en el extracto, sin recalcular importes.
+            </small>
+          </Field>
+          <Field label="Importe original">
+            <input
+              inputMode="decimal"
+              value={originalAmount}
+              onChange={(e) => setOriginalAmount(e.target.value)}
+            />
+          </Field>
+          <Field label="Moneda original">
+            <input
+              value={m.originalCurrency || ""}
+              maxLength={3}
+              placeholder="USD, GBP, JPY…"
+              onChange={(e) =>
+                setM({
+                  ...m,
+                  originalCurrency:
+                    e.target.value.trim().toUpperCase() || undefined,
+                })
+              }
+            />
+          </Field>
           <Field label="Concepto original">
             <input
               required
@@ -654,7 +788,7 @@ function MovementEditor({
               onChange={(e) => setM({ ...m, description: e.target.value })}
             />
           </Field>
-          <Field label="Comercio">
+          <Field label="Contraparte">
             <input
               value={m.merchant}
               onChange={(e) => setM({ ...m, merchant: e.target.value })}

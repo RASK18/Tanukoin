@@ -1,6 +1,15 @@
 import type { Account, Movement } from "../../data/types";
-import { parseAmount, parseDate, fingerprint } from "../../lib/finance";
+import {
+  parseAmount,
+  sourceDateTime,
+  movementDateRange,
+  fingerprint,
+  validateOriginalAmount,
+  validateMovementCosts,
+  parseExchangeRate,
+} from "../../lib/finance";
 import type { Candidate, DetectedLayout } from "./types";
+import { normalizeImportedText } from "../../lib/movement-text";
 export function explicitCurrencies(text: string): string[] {
   const currencies = [
     ...text.matchAll(
@@ -21,7 +30,6 @@ export const defaultLayout: DetectedLayout = {
     debit: -1,
     credit: -1,
     merchant: -1,
-    externalId: -1,
     balance: -1,
   },
 };
@@ -41,9 +49,38 @@ export function buildCandidates(
     const rowNumber = index + profile.headerRow + 2;
     if (!row.some((cell) => String(cell).trim())) return;
     try {
-      const date = parseDate(row[c.date], profile.dateFormat);
       const cell = (index: number | undefined) =>
         String(row[index ?? -1] ?? "").trim();
+      const dateCells = [
+        ...new Set([
+          c.date,
+          c.valueDate,
+          c.bookingDate,
+          c.completionDate,
+          c.secondaryDate,
+        ]),
+      ].filter(
+        (index): index is number =>
+          index !== undefined && index >= 0 && !!cell(index),
+      );
+      if (!dateCells.length) throw new Error("Falta la fecha");
+      if (cell(c.time) && !cell(c.date))
+        throw new Error("La hora principal necesita una fecha principal.");
+      if (cell(c.secondaryTime) && !cell(c.secondaryDate))
+        throw new Error("La hora secundaria necesita una fecha secundaria.");
+      const dates = movementDateRange(
+        dateCells.map((index) =>
+          sourceDateTime(
+            cell(index),
+            profile.dateFormat,
+            index === c.secondaryDate
+              ? cell(c.secondaryTime)
+              : index === c.date
+                ? cell(c.time)
+                : "",
+          ),
+        ),
+      );
       const currencies = new Set(
         [
           cell(c.currency).toUpperCase(),
@@ -69,33 +106,49 @@ export function buildCandidates(
         );
         return;
       }
-      const useful = (value: string) => (value && value !== "-" ? value : "");
-      const description =
-        profile.bank === "n26"
-          ? [
-              ...new Set(
-                [useful(cell(c.merchant)), useful(cell(c.reference))].filter(
-                  Boolean,
-                ),
-              ),
-            ].join(" · ") ||
-            useful(cell(c.type)) ||
-            "Sin concepto"
-          : cell(c.description) || "Sin concepto";
-      const notes: string[] = cell(c.notes) ? [cell(c.notes)] : [];
-      for (const [key, label] of [
-        ["valueDate", "Fecha valor"],
-        ["bookingDate", "Fecha contable / finalización"],
-      ] as const) {
-        const value = cell(c[key]);
-        if (value) {
-          parseDate(value, profile.dateFormat);
-          notes.push(`${label}: ${value}`);
-        }
-      }
-      const originalDate = cell(c.date);
-      if (/\d{2}:\d{2}/.test(originalDate))
-        notes.push(`Fecha de operación original: ${originalDate}`);
+      const text = normalizeImportedText({
+        description: cell(c.description),
+        merchant: cell(c.merchant),
+        reference: cell(c.reference),
+        notes: cell(c.notes),
+        fallback: profile.bank === "n26" ? cell(c.type) : undefined,
+        namedCounterparty:
+          profile.bank === "revolut" &&
+          ["TARJETA", "PAGO CON TARJETA", "CARD", "CARD_PAYMENT"].includes(
+            cell(c.type).toUpperCase(),
+          ),
+      });
+      const notes: string[] = text.notes ? [text.notes] : [];
+      const originalCurrency =
+        cell(c.originalCurrency).toUpperCase() || undefined;
+      if (
+        (cell(c.originalAmount) || originalCurrency) &&
+        (!cell(c.originalAmount) ||
+          !originalCurrency ||
+          !/^[A-Z]{3}$/.test(originalCurrency))
+      )
+        throw new Error(
+          "El importe original y su moneda deben indicarse juntos y ser válidos",
+        );
+      const originalAmount = originalCurrency
+        ? parseAmount(
+            cell(c.originalAmount).replace(
+              new RegExp(originalCurrency, "gi"),
+              "",
+            ),
+            profile.decimal,
+            originalCurrency,
+          )
+        : undefined;
+      if (
+        originalCurrency &&
+        explicitCurrencies(cell(c.originalAmount)).some(
+          (code) => code !== originalCurrency,
+        )
+      )
+        throw new Error(
+          "El importe original contiene una moneda distinta a la indicada",
+        );
       let amount: number;
       if (c.amount >= 0)
         amount = parseAmount(row[c.amount], profile.decimal, account.currency);
@@ -118,15 +171,23 @@ export function buildCandidates(
           throw new Error("Falta el importe");
         amount = credit - debit;
       }
-      if (profile.bank === "revolut" && cell(c.fee)) {
-        const fee = parseAmount(cell(c.fee), profile.decimal, currency);
-        if (fee < 0) throw new Error("La comisión no puede ser negativa");
-        if (fee)
-          notes.push(
-            `Importe original: ${cell(c.amount)} ${currency}. Comisión incluida: ${cell(c.fee)} ${currency}.`,
-          );
-        amount -= fee;
-      }
+      if (/[$¥]/.test(cell(c.fee)))
+        throw new Error("La comisión contiene un símbolo de moneda ambiguo");
+      if (cell(c.fee).includes("£") && currency !== "GBP")
+        throw new Error(
+          "La moneda de la comisión no coincide con la del movimiento",
+        );
+      const fee = cell(c.fee)
+        ? parseAmount(
+            cell(c.fee).replace(new RegExp(currency, "gi"), ""),
+            profile.decimal,
+            currency,
+          )
+        : undefined;
+      const exchangeRate = parseExchangeRate(cell(c.exchangeRate));
+      // Only the raw Revolut CSV amount excludes its separate fee. Our CSV and
+      // normalized PDF already contain the net amount, including any fee.
+      if (profile.bank === "revolut") amount -= fee ?? 0;
       if (!Number.isSafeInteger(amount))
         throw new Error("Importe fuera de rango");
       const m: Movement = {
@@ -138,28 +199,22 @@ export function buildCandidates(
             ? parseAmount(row[c.balance], profile.decimal, account.currency)
             : undefined,
         currency: account.currency,
-        description,
-        merchant: c.merchant >= 0 ? String(row[c.merchant] || "").trim() : "",
-        date,
+        description: text.description,
+        merchant: text.merchant,
+        ...dates,
         categorySource: "none",
         tagIds: [],
         notes: notes.join("\n"),
-        bookingDate: cell(c.bookingDate)
-          ? parseDate(cell(c.bookingDate), profile.dateFormat)
-          : undefined,
-        timestamp:
-          /^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(originalDate) &&
-          Number.isFinite(Date.parse(originalDate))
-            ? originalDate
-            : undefined,
+        originalAmount,
+        originalCurrency,
+        fee,
+        exchangeRate,
         source,
-        externalId:
-          c.externalId >= 0
-            ? String(row[c.externalId] || "").trim() || undefined
-            : undefined,
         fingerprint: "",
         createdAt: new Date().toISOString(),
       };
+      validateOriginalAmount(m);
+      validateMovementCosts(m);
       m.fingerprint = fingerprint(m);
       candidates.push({ movement: m, row: rowNumber, ...duplicateOfSaved(m) });
     } catch (error) {
@@ -173,20 +228,13 @@ export function buildCandidates(
 
 export function duplicateChecker(existing: Movement[]) {
   const byContent = new Map<string, Movement[]>();
-  const external = new Set<string>();
   for (const m of existing) {
     const key = fingerprint(m);
     byContent.set(key, [...(byContent.get(key) || []), m]);
-    if (m.externalId) external.add(JSON.stringify([m.accountId, m.externalId]));
   }
   return (
     m: Movement,
   ): Pick<Candidate, "duplicate" | "selected" | "balanceMissing"> => {
-    if (
-      m.externalId &&
-      external.has(JSON.stringify([m.accountId, m.externalId]))
-    )
-      return { duplicate: "exact", selected: false };
     const matches = byContent.get(fingerprint(m)) || [];
     if (
       m.balance !== undefined &&

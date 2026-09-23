@@ -20,11 +20,7 @@ it("no confunde coincidencias de importe con duplicados exactos", () => {
   expect(second.candidates[0].duplicate).toBe("possible");
   expect(second.candidates[0].selected).toBe(true); // No balance: keep for review.
 });
-it("reconoce identificadores bancarios y reporta errores por fila", () => {
-  const profile = {
-    ...defaultLayout,
-    columns: { ...defaultLayout.columns, externalId: 3 },
-  };
+it("ignora códigos bancarios y reporta errores por fila, sin descartar coincidencias sin saldo", () => {
   const result = buildCandidates(
     [
       ["fecha", "concepto", "importe", "id"],
@@ -32,23 +28,30 @@ it("reconoce identificadores bancarios y reporta errores por fila", () => {
       ["15/09/2026", "Compra distinta", "-2,00", "same"],
       ["31/02/2026", "Error", "1,00", "other"],
     ],
-    profile,
+    defaultLayout,
     account,
     "test",
     [],
   );
   expect(result.candidates[1].duplicate).toBe("none");
+  expect(
+    result.candidates.every((c) => !Object.hasOwn(c.movement, "externalId")),
+  ).toBe(true);
   const repeated = buildCandidates(
     [
       ["fecha", "concepto", "importe", "id"],
       ["15/09/2026", "Compra", "-1,00", "same"],
     ],
-    profile,
+    defaultLayout,
     account,
     "test",
     result.candidates.map((c) => c.movement),
   );
-  expect(repeated.candidates[0].duplicate).toBe("exact");
+  expect(repeated.candidates[0]).toMatchObject({
+    duplicate: "possible",
+    selected: true,
+    balanceMissing: true,
+  });
   expect(result.errors).toHaveLength(1);
 });
 

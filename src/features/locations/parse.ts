@@ -180,16 +180,6 @@ export function locationCandidates(
   timezone: string,
   includePrevious = false,
 ) {
-  if (m.timestamp) {
-    const t = Date.parse(m.timestamp);
-    return locations
-      .filter((l) => Date.parse(l.start) <= t && Date.parse(l.end) >= t)
-      .map((location) => ({
-        location,
-        evidence:
-          "El intervalo del historial coincide con la hora registrada de la operación.",
-      }));
-  }
   const first = new Date(`${m.date}T12:00:00Z`);
   first.setUTCDate(first.getUTCDate() - (includePrevious ? 3 : 0));
   const from = first.toISOString().slice(0, 10);
@@ -202,6 +192,6 @@ export function locationCandidates(
     .map((location) => ({
       location,
       evidence:
-        "Coincidencia por día, sin hora de compra. La contabilización puede ser posterior y la compra puede ser online.",
+        "Coincidencia por día; la operación no identifica un instante con zona horaria. La contabilización puede ser posterior y la compra puede ser online.",
     }));
 }

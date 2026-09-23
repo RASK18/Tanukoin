@@ -27,15 +27,30 @@ export interface Movement {
   description: string;
   merchant: string;
   date: string;
-  bookingDate?: string;
+  secondaryDate?: string;
+  originalAmount?: number;
+  originalCurrency?: string;
   balance?: number;
-  timestamp?: string;
+  /** Fee in the movement currency's minor units; already included in amount. */
+  fee?: number;
+  /** Explicit source quote (decimal or currency equation), never a computed rate. */
+  exchangeRate?: string;
+  /** Wall-clock time from the source, associated with date; no timezone conversion. */
+  time?: string;
+  secondaryTime?: string;
+  sourcePosition?: {
+    sheet: string;
+    page?: number;
+    row: number;
+    position: number;
+    previousPosition?: number;
+  };
+  order?: { rank: number; after: string[]; uncertain: boolean };
   categoryId?: string;
   tagIds: string[];
   categorySource: CategorySource;
   notes: string;
   source: string;
-  externalId?: string;
   fingerprint: string;
   importId?: string;
   aiSuggestion?: { categoryId: string; score: number };

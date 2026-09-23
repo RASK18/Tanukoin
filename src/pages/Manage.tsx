@@ -259,7 +259,7 @@ export function Rules() {
                           r.descriptionContains &&
                             `Concepto: ${r.descriptionContains}`,
                           r.merchantContains &&
-                            `Comercio: ${r.merchantContains}`,
+                            `Contraparte: ${r.merchantContains}`,
                           r.accountId &&
                             data.accounts.find((a) => a.id === r.accountId)
                               ?.name,
@@ -432,7 +432,7 @@ export function Rules() {
                   }
                 />
               </Field>
-              <Field label="El comercio contiene">
+              <Field label="La contraparte contiene">
                 <input
                   value={editing.merchantContains}
                   onChange={(e) =>

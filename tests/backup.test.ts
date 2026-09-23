@@ -13,6 +13,7 @@ it("restaura datos atómicamente y no restaura consentimientos de red", async ()
     name: "Principal",
     bank: "Banco",
     currency: "EUR",
+    externalId: "cuenta-bancaria-ficticia",
   });
   await db.settings.update("main", {
     maps: true,
@@ -34,18 +35,76 @@ it("restaura datos atómicamente y no restaura consentimientos de red", async ()
     "ficticio.csv",
     [],
   );
-  await db.movements.add(imported.candidates[0].movement);
+  await db.movements.add({
+    ...imported.candidates[0].movement,
+    secondaryDate: "2026-09-21",
+    time: "12:34:56",
+    secondaryTime: "09:15:00",
+    originalAmount: 500,
+    originalCurrency: "JPY",
+    fee: 25,
+    exchangeRate: "1 EUR = 160.123456789 JPY",
+  });
   const raw = JSON.parse(await exportBackup());
   expect(raw.schemaVersion).toBe(3);
   expect(raw.data).not.toHaveProperty("profiles");
   await db.accounts.clear();
   await restoreBackup(raw);
   expect(await db.accounts.count()).toBe(1);
+  expect((await db.accounts.get("a"))?.externalId).toBe(
+    "cuenta-bancaria-ficticia",
+  );
+  expect(raw.data.movements[0]).not.toHaveProperty("externalId");
   expect((await db.settings.get("main"))?.maps).toBe(false);
   expect((await db.settings.get("main"))?.hideImportWelcome).toBe(true);
   expect((await db.settings.get("main"))?.hideTanuWelcome).toBe(false);
   expect((await db.settings.get("main"))?.cpuThreads).toBe(6);
   expect((await db.movements.toArray())[0].balance).toBe(10000);
+  expect((await db.movements.toArray())[0]).toMatchObject({
+    secondaryDate: "2026-09-21",
+    time: "12:34:56",
+    secondaryTime: "09:15:00",
+    originalAmount: 500,
+    originalCurrency: "JPY",
+    fee: 25,
+    exchangeRate: "1 EUR = 160.123456789 JPY",
+  });
+  const valid = structuredClone(raw);
+  for (const update of [
+    { fee: -1 },
+    { fee: 1.5 },
+    { fee: "25" },
+    { fee: null },
+    { fee: Number.MAX_SAFE_INTEGER + 1 },
+    { exchangeRate: 1.25 },
+    { exchangeRate: "" },
+    { exchangeRate: "NaN" },
+    { exchangeRate: "0" },
+    { exchangeRate: "1 EUR = -2 USD" },
+    { exchangeRate: "instrucciones arbitrarias" },
+    { originalAmount: 1.5 },
+    { originalAmount: undefined },
+    { originalCurrency: undefined },
+    { originalCurrency: "usd" },
+    { externalId: "operacion-no-admitida" },
+    { timestamp: "2026-09-20T12:34:56Z" },
+    { time: "24:00:00" },
+    { time: "12:34:56Z" },
+    { time: "" },
+    { time: 120000 },
+    { secondaryTime: "09:60:00" },
+    { secondaryDate: undefined, secondaryTime: "09:15:00" },
+    { description: "Pago a ES00" + "0".repeat(20) },
+    { merchant: "Persona ficticia, ES00 " + "0000 ".repeat(5).trim() },
+    { notes: "IBAN: GB00FAKE" + "0".repeat(14) },
+    { secondaryDate: "2026-02-31" },
+    { secondaryDate: "2026-09-19" },
+  ]) {
+    const invalid = structuredClone(valid);
+    Object.assign(invalid.data.movements[0], update);
+    await expect(restoreBackup(invalid)).rejects.toThrow();
+    expect((await db.movements.toArray())[0].originalAmount).toBe(500);
+  }
   raw.data.movements[0].balance = "100";
   expect(() => validateBackup(raw)).toThrow();
 });

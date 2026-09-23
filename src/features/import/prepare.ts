@@ -2,6 +2,7 @@ import type { Account, Movement } from "../../data/types";
 import { detectImport } from "./detect";
 import { buildCandidates } from "./parse";
 import type { Candidate, DetectedLayout, ParsedFile } from "./types";
+import { inferSourceOrder } from "../../lib/movement-order";
 
 export function prepareImport(
   file: ParsedFile,
@@ -15,7 +16,8 @@ export function prepareImport(
     warnings = [...file.warnings],
     unknown: number[] = [];
   let informational = 0;
-  for (const index of indices) {
+  let previousSheet = -1;
+  for (const index of [...new Set(indices)].sort((a, b) => a - b)) {
     const sheet = file.sheets[index];
     if (!sheet) continue;
     if (sheet.informational) {
@@ -38,13 +40,38 @@ export function prepareImport(
       file.name,
       existing,
     );
+    const offset = file.sheets
+      .slice(0, index)
+      .reduce((sum, s) => sum + s.rows.length, 0);
+    const before = candidates.at(-1);
+    const layout = overrides[index] || detected.layout;
     candidates.push(
-      ...result.candidates.map((c) => ({
+      ...result.candidates.map((c, i) => ({
         ...c,
+        movement: {
+          ...c.movement,
+          sourcePosition: {
+            sheet: sheet.name,
+            page: sheet.page,
+            row: c.row,
+            position: offset + c.row,
+            previousPosition:
+              i > 0 && result.candidates[i - 1].row === c.row - 1
+                ? offset + c.row - 1
+                : i === 0 &&
+                    before &&
+                    previousSheet === index - 1 &&
+                    before.row === file.sheets[previousSheet].rows.length &&
+                    c.row === layout.headerRow + 2
+                  ? before.movement.sourcePosition?.position
+                  : undefined,
+          },
+        },
         sheet: sheet.name,
         page: sheet.page,
       })),
     );
+    previousSheet = index;
     errors.push(...result.errors.map((e) => `${sheet.name}: ${e}`));
     warnings.push(...result.warnings.map((w) => `${sheet.name}: ${w}`));
     if (
@@ -56,5 +83,12 @@ export function prepareImport(
         `${sheet.name}: no se han reconocido movimientos. Comprueba esta página o elige otro archivo.`,
       );
   }
-  return { candidates, errors, warnings, unknown, informational };
+  const ordered = inferSourceOrder(candidates.map((c) => c.movement));
+  return {
+    candidates: candidates.map((c, i) => ({ ...c, movement: ordered[i] })),
+    errors,
+    warnings,
+    unknown,
+    informational,
+  };
 }

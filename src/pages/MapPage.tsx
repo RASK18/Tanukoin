@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { orderMovements } from "../lib/movement-order";
 import { Link, useSearchParams } from "react-router-dom";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -323,14 +324,12 @@ export function MapPage() {
               onChange={(e) => setSelected(e.target.value)}
             >
               <option value="">Todos los cargos con ubicación</option>
-              {[...data.movements]
-                .sort((a, b) => b.date.localeCompare(a.date))
-                .map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.date} · {m.merchant || m.description} ·{" "}
-                    {money(m.amount, m.currency)}
-                  </option>
-                ))}
+              {orderMovements(data.movements, true).map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.date} · {m.merchant || m.description} ·{" "}
+                  {money(m.amount, m.currency)}
+                </option>
+              ))}
             </select>
           </Field>
           <span className="muted">
@@ -367,16 +366,14 @@ export function MapPage() {
               Las coincidencias son hipótesis. Una compra online o una fecha de
               contabilización posterior pueden no corresponder con tu ubicación.
             </p>
-            {!movement.timestamp && (
-              <label className="check-label">
-                <input
-                  type="checkbox"
-                  checked={previous}
-                  onChange={(e) => setPrevious(e.target.checked)}
-                />{" "}
-                Incluir los tres días anteriores
-              </label>
-            )}
+            <label className="check-label">
+              <input
+                type="checkbox"
+                checked={previous}
+                onChange={(e) => setPrevious(e.target.checked)}
+              />{" "}
+              Incluir los tres días anteriores
+            </label>
             {candidates.slice(0, 30).map((c) => (
               <div className="candidate" key={c.location.id}>
                 <strong>{c.location.name}</strong>

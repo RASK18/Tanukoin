@@ -69,4 +69,16 @@ it("compara por día local sin inventar una hora de compra", () => {
     locationCandidates(movement, parsed.locations, "Europe/Madrid"),
   ).toHaveLength(1);
   expect(locationCandidates(movement, parsed.locations, "UTC")).toHaveLength(0);
+  expect(
+    locationCandidates(
+      {
+        ...movement,
+        time: "22:00:00",
+        secondaryDate: "2026-09-02",
+        secondaryTime: "10:00:00",
+      },
+      parsed.locations,
+      "Europe/Madrid",
+    ),
+  ).toHaveLength(1);
 });

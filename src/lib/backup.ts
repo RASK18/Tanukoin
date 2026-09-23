@@ -1,7 +1,15 @@
 import { makeTag, validateCategoryTree } from "./classification";
 import { db, readSnapshot } from "../data/db";
 import type { Snapshot } from "../data/types";
-import { parseDate, validateRelation } from "./finance";
+import {
+  parseDate,
+  validateRelation,
+  validateOriginalAmount,
+  validateMovementCosts,
+  validateMovementDates,
+} from "./finance";
+import { validateMovementOrder } from "./movement-order";
+import { containsIban } from "./movement-text";
 
 const tables = [
   "accounts",
@@ -34,15 +42,21 @@ const fields: Record<(typeof tables)[number], string[]> = {
     "description",
     "merchant",
     "date",
-    "bookingDate",
+    "secondaryDate",
+    "originalAmount",
+    "originalCurrency",
+    "fee",
+    "exchangeRate",
     "balance",
-    "timestamp",
+    "time",
+    "secondaryTime",
+    "sourcePosition",
+    "order",
     "categoryId",
     "tagIds",
     "categorySource",
     "notes",
     "source",
-    "externalId",
     "fingerprint",
     "importId",
     "aiSuggestion",
@@ -204,8 +218,10 @@ export function validateBackup(input: unknown): Snapshot {
           [
             "bankBalanceAt",
             "externalId",
-            "bookingDate",
-            "timestamp",
+            "secondaryDate",
+            "originalCurrency",
+            "time",
+            "secondaryTime",
             "categoryId",
             "importId",
             "parentId",
@@ -220,13 +236,14 @@ export function validateBackup(input: unknown): Snapshot {
         if (
           [
             "amount",
+            "originalAmount",
             "openingBalance",
             "balance",
             "bankBalance",
             "minAmount",
             "maxAmount",
             "priority",
-            "order",
+            ...(table === "categories" ? ["order"] : []),
           ].includes(key) &&
           value !== undefined &&
           !Number.isSafeInteger(value)
@@ -235,14 +252,14 @@ export function validateBackup(input: unknown): Snapshot {
       }
       if (row.currency && !/^[A-Z]{3}$/.test(String(row.currency)))
         throw new Error("Moneda inválida");
-      for (const key of ["date", "bookingDate", "anchorDate", "nextDate"])
+      for (const key of ["date", "secondaryDate", "anchorDate", "nextDate"])
         if (
           row[key] &&
           (!/^\d{4}-\d{2}-\d{2}$/.test(String(row[key])) ||
             !Number.isFinite(Date.parse(String(row[key]))))
         )
           throw new Error("Fecha inválida");
-      for (const key of ["date", "bookingDate", "anchorDate", "nextDate"])
+      for (const key of ["date", "secondaryDate", "anchorDate", "nextDate"])
         if (row[key]) parseDate(row[key], "YMD");
       if (row.aiSuggestion !== undefined) {
         const suggestion = row.aiSuggestion as Record<string, unknown>;
@@ -297,6 +314,19 @@ export function validateBackup(input: unknown): Snapshot {
     }
   }
   const s = data as unknown as Snapshot;
+  s.movements.forEach(validateOriginalAmount);
+  s.movements.forEach(validateMovementCosts);
+  s.movements.forEach(validateMovementDates);
+  for (const movement of s.movements)
+    if (
+      [movement.description, movement.merchant, movement.notes].some(
+        containsIban,
+      )
+    )
+      throw new Error(
+        "La copia contiene IBAN en los textos de movimientos; no se guardarán esos datos.",
+      );
+  validateMovementOrder(s.movements);
   const accountIds = new Set(s.accounts.map((a) => a.id)),
     categoryIds = new Set(s.categories.map((c) => c.id)),
     movementIds = new Set(s.movements.map((m) => m.id)),

@@ -1,4 +1,5 @@
 import { defaultCategories } from "./default-categories";
+import { detachMovementOrder } from "../lib/movement-order";
 import Dexie, { type EntityTable } from "dexie";
 import type {
   Account,
@@ -34,8 +35,7 @@ export const db = new Dexie("tanukoin") as Dexie & {
 };
 db.version(3).stores({
   accounts: "id,externalId",
-  movements:
-    "id,accountId,date,categoryId,*tagIds,fingerprint,[accountId+externalId],importId",
+  movements: "id,accountId,date,categoryId,*tagIds,fingerprint,importId",
   categories: "id,parentId",
   tags: "id,&normalizedName",
   rules: "id,priority",
@@ -99,7 +99,13 @@ export async function removeMovements(ids: string[]) {
     "rw",
     [db.movements, db.relations, db.recurrences, db.assignments, db.embeddings],
     async () => {
+      const remaining = detachMovementOrder(
+        await db.movements.toArray(),
+        selected,
+        true,
+      );
       await db.movements.bulkDelete(ids);
+      if (remaining.length) await db.movements.bulkPut(remaining);
       await db.embeddings.bulkDelete(ids);
       await db.assignments.where("movementId").anyOf(ids).delete();
       for (const relation of await db.relations.toArray())
