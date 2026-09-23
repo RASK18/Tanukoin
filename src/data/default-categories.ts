@@ -1,3 +1,4 @@
+import { categoryEmoji } from "../lib/category-emoji";
 import type { Category } from "./types";
 
 const roots = [
@@ -34,7 +35,7 @@ export const defaultCategories: Category[] = roots.map(
     id,
     name,
     color,
-    icon,
+    icon: categoryEmoji(icon),
     description,
   }),
 );

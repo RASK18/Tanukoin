@@ -49,7 +49,15 @@ const fields: Record<(typeof tables)[number], string[]> = {
     "aiSuggestion",
     "createdAt",
   ],
-  categories: ["id", "name", "color", "icon", "parentId", "description"],
+  categories: [
+    "id",
+    "name",
+    "color",
+    "icon",
+    "parentId",
+    "description",
+    "order",
+  ],
   tags: ["id", "name", "normalizedName"],
   rules: [
     "id",
@@ -227,6 +235,7 @@ export function validateBackup(input: unknown): Snapshot {
             "minAmount",
             "maxAmount",
             "priority",
+            "order",
           ].includes(key) &&
           value !== undefined &&
           !Number.isSafeInteger(value)

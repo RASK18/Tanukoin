@@ -1,3 +1,4 @@
+import { categoryEmoji } from "../lib/category-emoji";
 import { categoryTree } from "../lib/classification";
 export { CategorySelect } from "./Classification";
 import {
@@ -7,20 +8,7 @@ import {
   useRef,
   type ReactNode,
 } from "react";
-import {
-  X,
-  Leaf,
-  House,
-  ShoppingBasket,
-  TrainFront,
-  Utensils,
-  Gamepad2,
-  HeartPulse,
-  ShoppingBag,
-  Wallet,
-  Ellipsis,
-  Folder,
-} from "lucide-react";
+import { X, Leaf } from "lucide-react";
 import type { Snapshot, Category } from "../data/types";
 import { emptySnapshot } from "../data/types";
 export const AppContext = createContext({
@@ -33,28 +21,21 @@ export const AppContext = createContext({
   online: true,
 });
 export const useApp = () => useContext(AppContext);
-const icons = {
-  House,
-  ShoppingBasket,
-  TrainFront,
-  Utensils,
-  Gamepad2,
-  HeartPulse,
-  ShoppingBag,
-  Wallet,
-  Ellipsis,
-  Folder,
-};
 export const CategoryIcon = ({
   name,
   size = 18,
 }: {
   name?: string;
   size?: number;
-}) => {
-  const Icon = icons[name as keyof typeof icons] || Folder;
-  return <Icon size={size} />;
-};
+}) => (
+  <span
+    aria-hidden="true"
+    className="category-emoji"
+    style={{ fontSize: size, lineHeight: 1 }}
+  >
+    {categoryEmoji(name)}
+  </span>
+);
 export function CategoryBadge({
   id,
   categories,

@@ -16,6 +16,7 @@ export interface Category {
   color: string;
   icon: string;
   parentId?: string;
+  order?: number;
   description: string;
 }
 export interface Movement {

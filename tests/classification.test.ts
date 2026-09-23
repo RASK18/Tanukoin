@@ -4,6 +4,8 @@ import { db, initialize, readSnapshot } from "../src/data/db";
 import type { Category, Movement, Rule } from "../src/data/types";
 import {
   assignCategory,
+  moveCategory,
+  updateCategoryDetails,
   changeTags,
   deleteCategoryBranch,
   deleteTag,
@@ -450,4 +452,71 @@ it("actualiza una base del esquema 1 conservando movimientos, categorías, prefe
   expect((await db.settings.get("main"))?.hideImportWelcome).toBe(true);
   expect((await db.models.get("embeddings"))?.ready).toBe(true);
   expect(await db.tags.count()).toBe(0);
+});
+
+it("ordena, cambia de padre y promueve ramas sin alterar movimientos ni reglas", async () => {
+  await db.movements.add(movement("m"));
+  await db.rules.add(rule);
+  await moveCategory("home", { targetId: "local", position: "before" });
+  expect(
+    categoryTree(await db.categories.toArray())
+      .children.get("")
+      ?.map((c) => c.id),
+  ).toEqual(["home", "local", "trip"]);
+  await moveCategory("transport", { targetId: "home", position: "inside" });
+  expect(categoryTree(await db.categories.toArray()).path("flight")).toBe(
+    "Vivienda → Transporte → Vuelos",
+  );
+  await moveCategory("flight", { position: "inside" });
+  expect((await db.categories.get("flight"))?.parentId).toBeUndefined();
+  expect((await db.categories.get("international"))?.parentId).toBe("flight");
+  expect(await db.movements.get("m")).toEqual(movement("m"));
+  expect(await db.rules.get("r")).toEqual(rule);
+  await updateCategoryDetails("transport", {
+    name: "Movilidad",
+    icon: "🚲",
+    color: "#123456",
+  });
+  expect(await db.categories.get("transport")).toMatchObject({
+    parentId: "home",
+    name: "Movilidad",
+    icon: "🚲",
+  });
+  const backup = JSON.parse(await exportBackup());
+  const restored = validateBackup(backup);
+  expect(
+    categoryTree(restored.categories)
+      .children.get("")
+      ?.map((c) => c.id),
+  ).toEqual(["home", "local", "trip", "flight"]);
+  await restoreBackup(backup);
+  expect(await db.categories.get("transport")).toMatchObject({
+    parentId: "home",
+    icon: "🚲",
+  });
+  expect(
+    categoryTree(await db.categories.toArray())
+      .children.get("")
+      ?.map((c) => c.id),
+  ).toEqual(["home", "local", "trip", "flight"]);
+  const bad = structuredClone(backup);
+  bad.data.categories[0].order = "bad" as unknown as number;
+  expect(() => validateBackup(bad)).toThrow("Entero inválido");
+});
+
+it("rechaza destinos cíclicos, ausentes y duplicados sin modificar el orden", async () => {
+  const before = await db.categories.toArray();
+  await expect(
+    moveCategory("trip", { targetId: "international", position: "inside" }),
+  ).rejects.toThrow("propia rama");
+  await expect(
+    moveCategory("trip", { targetId: "trip", position: "after" }),
+  ).rejects.toThrow("propia rama");
+  await expect(
+    moveCategory("transport", { position: "inside" }),
+  ).rejects.toThrow("Ya existe");
+  await expect(
+    moveCategory("trip", { targetId: "missing", position: "before" }),
+  ).rejects.toThrow("ya no existe");
+  expect(await db.categories.toArray()).toEqual(before);
 });

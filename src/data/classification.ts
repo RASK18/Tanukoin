@@ -33,6 +33,52 @@ export async function saveCategory(category: Category, creating = false) {
   });
 }
 
+/** Patch only the edited fields, preserving a concurrent move or description edit. */
+export async function updateCategoryDetails(
+  id: string,
+  changes: Partial<Pick<Category, "name" | "icon" | "color" | "description">>,
+) {
+  await db.transaction("rw", db.categories, async () => {
+    const current = await db.categories.get(id);
+    if (!current) throw new Error("La categoría ya no existe.");
+    await saveCategory({ ...current, ...changes });
+  });
+}
+
+export type CategoryDrop = {
+  targetId?: string;
+  position: "before" | "after" | "inside";
+};
+export async function moveCategory(id: string, drop: CategoryDrop) {
+  await db.transaction("rw", db.categories, async () => {
+    const categories = await db.categories.toArray();
+    const tree = categoryTree(categories);
+    const current = tree.byId.get(id),
+      target = drop.targetId ? tree.byId.get(drop.targetId) : undefined;
+    if (!current || (drop.targetId && !target))
+      throw new Error("La categoría ya no existe.");
+    if (target && tree.branch(id).has(target.id))
+      throw new Error(
+        "No puedes mover una categoría dentro de su propia rama.",
+      );
+    const parentId = drop.position === "inside" ? target?.id : target?.parentId;
+    const siblings = (tree.children.get(parentId || "") || []).filter(
+      (c) => c.id !== id,
+    );
+    if (siblings.some((c) => normalize(c.name) === normalize(current.name)))
+      throw new Error("Ya existe una categoría con ese nombre en este nivel.");
+    const next = { ...current, parentId };
+    validateCategoryTree([...categories.filter((c) => c.id !== id), next]);
+    const index =
+      target && drop.position !== "inside"
+        ? siblings.findIndex((c) => c.id === target.id) +
+          (drop.position === "after" ? 1 : 0)
+        : siblings.length;
+    siblings.splice(index, 0, next);
+    await db.categories.bulkPut(siblings.map((c, order) => ({ ...c, order })));
+  });
+}
+
 export function deletionImpact(
   id: string,
   categories: Category[],

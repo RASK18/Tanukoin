@@ -15,7 +15,11 @@ export function categoryTree(categories: Category[]) {
   }
   for (const siblings of children.values())
     siblings.sort(
-      (a, b) => a.name.localeCompare(b.name, "es") || a.id.localeCompare(b.id),
+      (a, b) =>
+        (a.order ?? Number.MAX_SAFE_INTEGER) -
+          (b.order ?? Number.MAX_SAFE_INTEGER) ||
+        a.name.localeCompare(b.name, "es") ||
+        a.id.localeCompare(b.id),
     );
   function ancestors(id?: string): Category[] {
     const result: Category[] = [],

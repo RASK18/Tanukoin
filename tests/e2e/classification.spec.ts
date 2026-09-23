@@ -211,29 +211,36 @@ test("crea un cuarto nivel, mueve ramas y confirma la eliminación con su impact
       exact: true,
     })
     .click();
-  await page.getByLabel("Nombre", { exact: true }).fill("Internacionales");
-  await page.getByRole("button", { name: "Guardar categoría" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page
+    .getByLabel("Nombre de nueva categoría", { exact: true })
+    .fill("Internacionales");
+  await page.locator(".is-new").screenshot({
+    path: "test-results/categories-new-child.png",
+    animations: "disabled",
+  });
+  await page.getByRole("button", { name: "Guardar", exact: true }).click();
   await expect(
     page.getByRole("button", {
-      name: "Editar Viajes → Transporte → Vuelos → Internacionales",
+      name: "Mover Viajes → Transporte → Vuelos → Internacionales",
       exact: true,
     }),
   ).toBeVisible();
   await page
-    .getByRole("button", { name: "Editar Viajes → Transporte", exact: true })
+    .getByRole("button", { name: "Mover Viajes → Transporte", exact: true })
     .click();
-  await page
-    .getByRole("combobox", { name: "Categoría padre", exact: true })
-    .fill("Vuelos");
-  await expect(page.getByRole("listbox").getByRole("option")).toHaveCount(0);
-  await choose(page, "Categoría padre", "Vivienda", "Vivienda");
-  await expect(page.getByRole("dialog")).toContainText(
-    "Se moverá toda la rama",
-  );
-  await page.getByRole("button", { name: "Guardar categoría" }).click();
   await expect(
     page.getByRole("button", {
-      name: "Editar Vivienda → Transporte → Vuelos → Internacionales",
+      name: "Mover dentro de Viajes → Transporte → Vuelos",
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  await page
+    .getByRole("button", { name: "Mover dentro de Vivienda", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", {
+      name: "Mover Vivienda → Transporte → Vuelos → Internacionales",
       exact: true,
     }),
   ).toBeVisible();
@@ -252,7 +259,7 @@ test("crea un cuarto nivel, mueve ramas y confirma la eliminación con su impact
   await page.getByRole("button", { name: "Cancelar", exact: true }).click();
   await expect(
     page.getByRole("button", {
-      name: "Editar Vivienda → Transporte → Vuelos",
+      name: "Mover Vivienda → Transporte → Vuelos",
       exact: true,
     }),
   ).toBeVisible();
@@ -386,13 +393,12 @@ test("renombra y elimina etiquetas con revisión, y gestiona categorías a 320 p
   await page.setViewportSize({ width: 320, height: 844 });
   await page.goto("#/categorias");
   await page
-    .getByRole("button", { name: "Editar Transporte", exact: true })
-    .click();
-  await page.getByLabel("Nombre", { exact: true }).fill("Movilidad");
-  await page.getByRole("button", { name: "Guardar categoría" }).click();
+    .getByLabel("Nombre de Transporte", { exact: true })
+    .fill("Movilidad");
+  await page.getByRole("button", { name: "Guardar", exact: true }).click();
   await expect(
     page.getByRole("button", {
-      name: "Editar Movilidad → Transporte público",
+      name: "Mover Movilidad → Transporte público",
       exact: true,
     }),
   ).toBeVisible();
@@ -427,4 +433,218 @@ test("renombra y elimina etiquetas con revisión, y gestiona categorías a 320 p
       .getByRole("dialog")
       .evaluate((el) => el.scrollWidth <= el.clientWidth),
   ).toBe(true);
+});
+
+test("edita en línea, elige emojis, arrastra y conserva el orden al recargar", async ({
+  page,
+}) => {
+  await seed(page);
+  await page.goto("#/categorias");
+  await page
+    .getByLabel("Nombre de Alimentación", { exact: true })
+    .fill("Temporal");
+  await page
+    .getByLabel("Nombre de Alimentación", { exact: true })
+    .fill("Alimentación");
+  await expect(
+    page.getByRole("button", { name: "Mover Alimentación", exact: true }),
+  ).toBeEnabled();
+  const food = page.getByRole("form", {
+    name: "Editar Alimentación",
+    exact: true,
+  });
+  await food
+    .getByLabel("Nombre de Alimentación", { exact: true })
+    .fill("Comida");
+  await food
+    .getByRole("button", { name: "Emoji de Alimentación", exact: true })
+    .click();
+  await page.getByLabel("Buscar emoji").fill("pizza");
+  await page.getByRole("button", { name: "Pizza", exact: true }).click();
+  await food
+    .getByLabel("Color de Alimentación", { exact: true })
+    .fill("#aabbcc");
+  await food.getByRole("button", { name: "Guardar", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Emoji de Comida", exact: true }),
+  ).toContainText("🍕");
+  await page
+    .getByRole("button", {
+      name: "Descripción para la IA de Comida",
+      exact: true,
+    })
+    .click();
+  await expect(page.getByRole("dialog").getByRole("textbox")).toHaveCount(1);
+  await page
+    .getByLabel("Descripción para la IA", { exact: true })
+    .fill("Comidas ficticias");
+  await page.getByRole("button", { name: "Guardar descripción" }).click();
+  await page
+    .getByRole("button", {
+      name: "Añadir categoría dentro de Comida",
+      exact: true,
+    })
+    .click();
+  await page.getByLabel("Nombre de nueva categoría").fill("Descartada");
+  await page.getByRole("button", { name: "Cancelar nueva categoría" }).click();
+  await expect(page.locator('input[value="Descartada"]')).toHaveCount(0);
+  await page
+    .getByRole("button", { name: "Contraer todo", exact: true })
+    .click();
+  const handle = page.getByRole("button", {
+    name: "Mover Vivienda",
+    exact: true,
+  });
+  await handle.scrollIntoViewIfNeeded();
+  const box = (await handle.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 12, box.y + box.height / 2, {
+    steps: 3,
+  });
+  const target = page.getByRole("button", {
+    name: "Colocar antes de Comida",
+    exact: true,
+  });
+  await target.scrollIntoViewIfNeeded();
+  const dest = (await target.boundingBox())!;
+  await page.mouse.move(dest.x + dest.width / 2, dest.y + dest.height / 2, {
+    steps: 15,
+  });
+  await page.mouse.up();
+  await expect(
+    page.getByRole("button", { name: "Cancelar movimiento" }),
+  ).toHaveCount(0);
+  await expect(page.locator("[data-category-id]").first()).toHaveAttribute(
+    "data-category-id",
+    "home",
+  );
+  await page.reload();
+  await expect(page.locator("[data-category-id]").first()).toHaveAttribute(
+    "data-category-id",
+    "home",
+  );
+  await page
+    .getByRole("button", { name: "Mover Comida → Restaurantes", exact: true })
+    .focus();
+  await page.keyboard.press("Enter");
+  await page
+    .getByRole("button", {
+      name: "Convertir en categoría principal",
+      exact: true,
+    })
+    .focus();
+  await page.keyboard.press("Enter");
+  await expect(
+    page.getByLabel("Nombre de Restaurantes", { exact: true }),
+  ).toBeVisible();
+  await page.setViewportSize({ width: 320, height: 844 });
+  await page
+    .getByRole("button", { name: "Mover Restaurantes", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Mover dentro de Comida", exact: true })
+    .click();
+  await expect(
+    page.getByLabel("Nombre de Comida → Restaurantes", { exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Contraer todo", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Emoji de Comida", exact: true })
+    .click();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  const popup = await page
+    .getByRole("group", { name: "Elegir emoji" })
+    .boundingBox();
+  expect(popup!.x).toBeGreaterThanOrEqual(0);
+  expect(popup!.x + popup!.width).toBeLessThanOrEqual(320);
+  await page.getByRole("button", { name: "Cerrar aviso" }).click();
+  await page
+    .getByRole("button", { name: "Emoji de Comida", exact: true })
+    .click();
+  await page.screenshot({
+    path: "test-results/categories-inline-mobile.png",
+    fullPage: true,
+    animations: "disabled",
+  });
+  await page.keyboard.press("Escape");
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({
+    path: "test-results/categories-inline-desktop.png",
+    fullPage: true,
+    animations: "disabled",
+  });
+});
+
+test.describe("Interacción táctil de categorías", () => {
+  test.use({ hasTouch: true, viewport: { width: 390, height: 844 } });
+  test("arrastra con tacto y permite elegir destinos mediante toques", async ({
+    page,
+    context,
+  }) => {
+    await seed(page);
+    await page.goto("#/categorias");
+    await page
+      .getByRole("button", { name: "Contraer todo", exact: true })
+      .tap();
+    const handle = page.getByRole("button", {
+      name: "Mover Compras",
+      exact: true,
+    });
+    await handle.scrollIntoViewIfNeeded();
+    const box = (await handle.boundingBox())!;
+    const session = await context.newCDPSession(page);
+    const x = box.x + box.width / 2,
+      y = box.y + box.height / 2;
+    await session.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [{ x, y }],
+    });
+    await session.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [{ x: x + 12, y }],
+    });
+    const target = page.getByRole("button", {
+      name: "Mover dentro de Alimentación",
+      exact: true,
+    });
+    await target.scrollIntoViewIfNeeded();
+    const drop = (await target.boundingBox())!;
+    await session.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [
+        { x: drop.x + drop.width / 2, y: drop.y + drop.height / 2 },
+      ],
+    });
+    await session.send("Input.dispatchTouchEvent", {
+      type: "touchEnd",
+      touchPoints: [],
+    });
+    await expect(
+      page.getByLabel("Nombre de Alimentación → Compras", { exact: true }),
+    ).toBeVisible();
+    await page
+      .getByRole("button", {
+        name: "Mover Alimentación → Compras",
+        exact: true,
+      })
+      .tap();
+    await page
+      .getByRole("button", {
+        name: "Convertir en categoría principal",
+        exact: true,
+      })
+      .tap();
+    await expect(
+      page.getByLabel("Nombre de Compras", { exact: true }),
+    ).toBeVisible();
+    await session.detach();
+  });
 });
