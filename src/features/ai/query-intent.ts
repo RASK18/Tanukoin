@@ -1,3 +1,4 @@
+import { categoryTree } from "../../lib/classification";
 import type { Snapshot } from "../../data/types";
 import { currencyDigits, normalize, parseDate } from "../../lib/finance";
 import { validateQuery, type QuerySpec, type Clarification } from "./queries";
@@ -18,6 +19,8 @@ export interface QueryDraft {
   direction?: QuerySpec["direction"];
   account?: string;
   category?: string;
+  tags?: string[];
+  tagMode?: QuerySpec["tagMode"];
   currency?: string;
   text?: string;
   excludeText?: string;
@@ -85,6 +88,8 @@ const draftFields = {
       "merchant",
     ],
   },
+  tags: { type: "array", items: { type: "string" } },
+  tagMode: { type: "string", enum: ["all", "any", "none"] },
   text: { type: "string" },
   excludeText: { type: "string" },
   direction: { type: "string", enum: ["expense", "income", "all"] },
@@ -144,6 +149,16 @@ export function readDraft(value: unknown): QueryDraft {
     if (key === "clear") {
       if (!Array.isArray(item) || item.some((key) => !clearable.includes(key)))
         throw new Error("Condiciones a retirar no válidas.");
+    } else if (key === "tags") {
+      if (
+        !Array.isArray(item) ||
+        item.length > 100 ||
+        item.some(
+          (name) =>
+            typeof name !== "string" || name.length > 500 || !name.trim(),
+        )
+      )
+        throw new Error("Etiquetas no válidas.");
     } else if (key === "period" || key === "comparison") {
       const p = record(item, Object.keys(periodProperties));
       if (!periodProperties.kind.enum.includes(p.kind as string))
@@ -265,6 +280,7 @@ export function normalizeDraft(
   const q: QuerySpec = { op: draft.op };
   for (const key of [
     "direction",
+    "tagMode",
     "currency",
     "text",
     "excludeText",
@@ -283,22 +299,40 @@ export function normalizeDraft(
     q.comparisonFrom = period.from;
     q.comparisonTo = period.to;
   }
+  const tree = categoryTree(data.categories);
   for (const [key, records, target] of [
     ["account", data.accounts, "accountId"],
     ["category", data.categories, "categoryId"],
   ] as const) {
     if (!draft[key]) continue;
     const matches = records.filter(
-      (r) => normalize(r.name) === normalize(draft[key]!),
+      (r) =>
+        normalize(
+          key === "category" && draft[key]!.includes("→")
+            ? tree.path(r.id)
+            : r.name,
+        ) === normalize(draft[key]!),
     );
     if (matches.length !== 1)
       return {
         op: "clarify",
         question: matches.length
-          ? `Hay varias coincidencias para «${draft[key]}». ¿Puedes concretar la ${key === "account" ? "cuenta" : "categoría"}?`
+          ? `Hay varias coincidencias para «${draft[key]}»: ${matches.map((r) => (key === "category" ? tree.path(r.id) : r.name)).join("; ")}. ¿Cuál quieres consultar?`
           : `No encuentro ${key === "account" ? "la cuenta" : "la categoría"} «${draft[key]}». ¿Cuál quieres consultar?`,
       };
     q[target] = matches[0].id;
+  }
+  if (draft.tags?.length && draft.tagMode !== "none") {
+    q.tagIds = [];
+    for (const name of draft.tags) {
+      const tag = data.tags.find((t) => normalize(t.name) === normalize(name));
+      if (!tag)
+        return {
+          op: "clarify",
+          question: `No encuentro la etiqueta «${name}». ¿Cuál quieres consultar?`,
+        };
+      if (!q.tagIds.includes(tag.id)) q.tagIds.push(tag.id);
+    }
   }
   if (draft.amountMin !== undefined || draft.amountMax !== undefined) {
     const currencies = [

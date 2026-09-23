@@ -37,6 +37,7 @@ export function chatFixture() {
       notes: i === 4 ? "equipo oficina" : "",
       source: "test",
       fingerprint: `m${i}`,
+      tagIds: [],
       categorySource: categoryId ? "manual" : "none",
       categoryId,
       createdAt: date,

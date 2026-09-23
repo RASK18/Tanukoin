@@ -1,3 +1,4 @@
+import { validAutomaticCategory } from "../../data/classification";
 import { getActiveChatModel } from "../ai/model-store";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -238,7 +239,11 @@ export function ImportDialog({
           }
         }
         setSaving({ phase: "Comprobando identificadores bancarios" });
-        await db.transaction("rw", db.movements, async () => {
+        await db.transaction("rw", [db.movements, db.categories], async () => {
+          const categories = new Set(
+            (await db.categories.toArray()).map((c) => c.id),
+          );
+          prepared = prepared.map((m) => validAutomaticCategory(m, categories));
           const savedExternal = new Set(
             (await db.movements.toArray())
               .filter((m) => m.externalId)

@@ -70,6 +70,7 @@ export function buildCandidates(
         merchant: c.merchant >= 0 ? String(row[c.merchant] || "").trim() : "",
         date,
         categorySource: "none",
+        tagIds: [],
         notes: "",
         source,
         externalId:

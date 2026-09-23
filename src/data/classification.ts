@@ -1,0 +1,232 @@
+import { db } from "./db";
+import type { Category, Movement, Rule, Tag } from "./types";
+import {
+  categoryTree,
+  makeTag,
+  validateCategoryTree,
+} from "../lib/classification";
+import { normalize, validateRelation } from "../lib/finance";
+
+export async function saveCategory(category: Category, creating = false) {
+  await db.transaction("rw", db.categories, async () => {
+    const categories = await db.categories.toArray();
+    if (!creating && !categories.some((c) => c.id === category.id))
+      throw new Error(
+        "La categoría ya no existe. Cierra y vuelve a abrir el editor.",
+      );
+    const next = {
+      ...category,
+      name: category.name.trim().replace(/\s+/g, " "),
+    };
+    if (!next.name) throw new Error("Escribe un nombre para la categoría.");
+    if (
+      categories.some(
+        (c) =>
+          c.id !== next.id &&
+          (c.parentId || "") === (next.parentId || "") &&
+          normalize(c.name) === normalize(next.name),
+      )
+    )
+      throw new Error("Ya existe una categoría con ese nombre en este nivel.");
+    validateCategoryTree([...categories.filter((c) => c.id !== next.id), next]);
+    await db.categories.put(next);
+  });
+}
+
+export function deletionImpact(
+  id: string,
+  categories: Category[],
+  movements: Movement[],
+  rules: Rule[],
+) {
+  const ids = categoryTree(categories).branch(id);
+  return {
+    categoryIds: [...ids].sort(),
+    movementIds: movements
+      .filter((m) => m.categoryId && ids.has(m.categoryId))
+      .map((m) => m.id)
+      .sort(),
+    ruleIds: rules
+      .filter((r) => r.categoryId && ids.has(r.categoryId))
+      .map((r) => r.id)
+      .sort(),
+  };
+}
+
+export async function deleteCategoryBranch(
+  id: string,
+  expected: ReturnType<typeof deletionImpact>,
+) {
+  await db.transaction(
+    "rw",
+    [db.categories, db.movements, db.rules, db.embeddings],
+    async () => {
+      const categories = await db.categories.toArray(),
+        movements = await db.movements.toArray();
+      const impact = deletionImpact(
+        id,
+        categories,
+        movements,
+        await db.rules.toArray(),
+      );
+      if (JSON.stringify(impact) !== JSON.stringify(expected))
+        throw new Error(
+          "Los datos han cambiado. Revisa de nuevo el alcance antes de eliminar.",
+        );
+      const ids = new Set(impact.categoryIds);
+      for (const m of movements) {
+        const assigned = !!m.categoryId && ids.has(m.categoryId);
+        const suggested =
+          !!m.aiSuggestion && ids.has(m.aiSuggestion.categoryId);
+        if (assigned || suggested)
+          await db.movements.update(m.id, {
+            ...(assigned
+              ? { categoryId: undefined, categorySource: "manual" as const }
+              : {}),
+            aiSuggestion: undefined,
+          });
+      }
+      await db.rules.bulkDelete(impact.ruleIds);
+      await db.embeddings.bulkDelete(
+        impact.categoryIds.map((cid) => `category:${cid}`),
+      );
+      await db.categories.bulkDelete(impact.categoryIds);
+    },
+  );
+}
+
+export async function saveTag(tag: Tag, creating = false) {
+  await db.transaction("rw", db.tags, async () => {
+    if (!creating && !(await db.tags.get(tag.id)))
+      throw new Error("La etiqueta ya no existe.");
+    const next = makeTag(tag.name, tag.id);
+    const existing = await db.tags
+      .where("normalizedName")
+      .equals(next.normalizedName)
+      .first();
+    if (existing && existing.id !== tag.id)
+      throw new Error(`Ya existe la etiqueta «${existing.name}».`);
+    await db.tags.put(next);
+  });
+}
+
+export async function deleteTag(id: string) {
+  await db.transaction("rw", [db.tags, db.movements], async () => {
+    await db.movements
+      .where("tagIds")
+      .equals(id)
+      .modify((m) => {
+        m.tagIds = m.tagIds.filter((tagId) => tagId !== id);
+      });
+    await db.tags.delete(id);
+  });
+}
+
+export async function assignCategory(ids: string[], categoryId: string) {
+  await db.transaction("rw", [db.categories, db.movements], async () => {
+    if (categoryId && !(await db.categories.get(categoryId)))
+      throw new Error("La categoría ya no existe.");
+    for (const id of ids)
+      await db.movements.update(id, {
+        categoryId: categoryId || undefined,
+        categorySource: "manual",
+        aiSuggestion: undefined,
+      });
+  });
+}
+
+export async function changeTags(
+  ids: string[],
+  tagIds: string[],
+  action: "add" | "remove",
+) {
+  await db.transaction("rw", [db.tags, db.movements], async () => {
+    for (const id of tagIds)
+      if (!(await db.tags.get(id)))
+        throw new Error("Una etiqueta ya no existe. Revisa la selección.");
+    for (const id of ids) {
+      const movement = await db.movements.get(id);
+      if (movement)
+        await db.movements.update(id, {
+          tagIds:
+            action === "add"
+              ? [...new Set([...movement.tagIds, ...tagIds])]
+              : movement.tagIds.filter((tag) => !tagIds.includes(tag)),
+        });
+    }
+  });
+}
+
+export async function saveEditedMovement(
+  movement: Movement,
+  categoryChanged: boolean,
+  pendingTags: Tag[],
+) {
+  await db.transaction(
+    "rw",
+    [db.movements, db.categories, db.tags, db.relations],
+    async () => {
+      const current = await db.movements.get(movement.id);
+      if (!current) throw new Error("El movimiento ya no existe.");
+      const next = {
+        ...movement,
+        categoryId: categoryChanged ? movement.categoryId : current.categoryId,
+        categorySource: categoryChanged
+          ? ("manual" as const)
+          : current.categorySource,
+        aiSuggestion: categoryChanged ? undefined : current.aiSuggestion,
+      };
+      if (next.categoryId && !(await db.categories.get(next.categoryId)))
+        throw new Error("La categoría ya no existe. Elige otra categoría.");
+      const resolved: string[] = [];
+      for (const id of new Set(next.tagIds)) {
+        const pending = pendingTags.find((t) => t.id === id);
+        if (pending) {
+          const tag = makeTag(pending.name, pending.id);
+          const existing = await db.tags
+            .where("normalizedName")
+            .equals(tag.normalizedName)
+            .first();
+          if (!existing) await db.tags.add(tag);
+          resolved.push(existing?.id || tag.id);
+        } else {
+          if (!(await db.tags.get(id)))
+            throw new Error(
+              "Una etiqueta ya no existe. Quítala de la selección antes de guardar.",
+            );
+          resolved.push(id);
+        }
+      }
+      next.tagIds = [...new Set(resolved)];
+      const all = await db.movements.toArray();
+      for (const relation of await db.relations
+        .where("movementIds")
+        .equals(next.id)
+        .toArray())
+        validateRelation(
+          relation.type,
+          all
+            .filter((m) => relation.movementIds.includes(m.id))
+            .map((m) => (m.id === next.id ? next : m)),
+        );
+      await db.movements.put(next);
+    },
+  );
+}
+
+/** Discard stale automatic references before committing an in-flight import/AI result. */
+export function validAutomaticCategory(
+  movement: Movement,
+  categories: Set<string>,
+): Movement {
+  return {
+    ...movement,
+    ...(movement.categoryId && !categories.has(movement.categoryId)
+      ? { categoryId: undefined, categorySource: "none" as const }
+      : {}),
+    aiSuggestion:
+      movement.aiSuggestion && categories.has(movement.aiSuggestion.categoryId)
+        ? movement.aiSuggestion
+        : undefined,
+  };
+}

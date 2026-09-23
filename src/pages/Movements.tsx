@@ -1,3 +1,16 @@
+import {
+  assignCategory,
+  changeTags,
+  saveEditedMovement,
+} from "../data/classification";
+import {
+  categoryTree,
+  makeTag,
+  matchesTags,
+  movementSearchText,
+  type TagMode,
+} from "../lib/classification";
+import { TagChips, TagFilter, TagPicker } from "../components/Classification";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
@@ -21,7 +34,7 @@ import {
   Modal,
 } from "../components/ui";
 import { db, removeMovements } from "../data/db";
-import type { Movement, Relation } from "../data/types";
+import type { Movement, Relation, Tag } from "../data/types";
 import {
   money,
   displayDate,
@@ -36,6 +49,10 @@ import { semanticSearch } from "../features/ai/client";
 export function Movements({ onImport }: { onImport: () => void }) {
   const { data, run, notify } = useApp();
   const [params] = useSearchParams();
+  const tree = useMemo(() => categoryTree(data.categories), [data.categories]);
+  const [filterTags, setFilterTags] = useState<string[]>([]),
+    [tagMode, setTagMode] = useState<TagMode>("all"),
+    [batchTags, setBatchTags] = useState<string[]>([]);
   const [query, setQuery] = useState(params.get("buscar") || ""),
     [account, setAccount] = useState(""),
     [category, setCategory] = useState(""),
@@ -58,7 +75,8 @@ export function Movements({ onImport }: { onImport: () => void }) {
   useEffect(() => {
     setPage(0);
     setSemanticIds(null);
-  }, [query, account, category, from, to, currency]);
+  }, [query, account, category, from, to, currency, filterTags, tagMode]);
+  const categoryIds = useMemo(() => tree.branch(category), [tree, category]);
   const rows = useMemo(
     () =>
       data.movements
@@ -67,16 +85,15 @@ export function Movements({ onImport }: { onImport: () => void }) {
             (semanticIds
               ? semanticIds.includes(m.id)
               : !query ||
-                normalize(`${m.description} ${m.merchant} ${m.notes}`).includes(
+                movementSearchText(m, tree, data.tags).includes(
                   normalize(query),
                 )) &&
             (!account || m.accountId === account) &&
             (!category ||
               (category === "uncategorized"
                 ? !m.categoryId
-                : m.categoryId === category ||
-                  data.categories.find((c) => c.id === m.categoryId)
-                    ?.parentId === category)) &&
+                : !!m.categoryId && categoryIds.has(m.categoryId))) &&
+            matchesTags(m, filterTags, tagMode) &&
             (!from || m.date >= from) &&
             (!to || m.date <= to) &&
             (!currency || m.currency === currency),
@@ -88,7 +105,21 @@ export function Movements({ onImport }: { onImport: () => void }) {
               ? a.date.localeCompare(b.date)
               : b.date.localeCompare(a.date),
         ),
-    [data, query, account, category, from, to, sort, semanticIds, currency],
+    [
+      data,
+      query,
+      account,
+      category,
+      from,
+      to,
+      sort,
+      semanticIds,
+      currency,
+      tree,
+      categoryIds,
+      filterTags,
+      tagMode,
+    ],
   );
   const visible = rows.slice(page * 30, page * 30 + 30);
   async function link() {
@@ -131,6 +162,7 @@ export function Movements({ onImport }: { onImport: () => void }) {
         "Categoría",
         "Notas",
         "Saldo",
+        "Etiquetas",
       ],
       ...rows.map((m) => [
         m.date,
@@ -141,13 +173,17 @@ export function Movements({ onImport }: { onImport: () => void }) {
           .replace(".", ","),
         m.currency,
         data.accounts.find((a) => a.id === m.accountId)?.name,
-        data.categories.find((c) => c.id === m.categoryId)?.name,
+        tree.path(m.categoryId),
         m.notes,
         m.balance === undefined
           ? ""
           : (m.balance / 10 ** currencyDigits(m.currency))
               .toFixed(currencyDigits(m.currency))
               .replace(".", ","),
+        m.tagIds
+          .map((id) => data.tags.find((t) => t.id === id)?.name)
+          .filter(Boolean)
+          .join(" | "),
       ]),
     ]
       .map((row) => row.map(csvCell).join(";"))
@@ -186,7 +222,7 @@ export function Movements({ onImport }: { onImport: () => void }) {
               aria-label="Filtrar movimientos"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Comercio, concepto o nota…"
+              placeholder="Concepto, categoría o etiqueta…"
             />
           </label>
           <AccountSelect
@@ -195,19 +231,21 @@ export function Movements({ onImport }: { onImport: () => void }) {
             data={data}
             all
           />
-          <select
-            aria-label="Filtrar categoría"
+          <CategorySelect
+            label="Filtrar categoría"
             value={category}
-            onChange={(e) => setCategory(e.target.value)}
-          >
-            <option value="">Todas las categorías</option>
-            <option value="uncategorized">Sin categorizar</option>
-            {data.categories.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+            onChange={setCategory}
+            categories={data.categories}
+            emptyLabel="Todas las categorías"
+            filter
+          />
+          <TagFilter
+            tags={data.tags}
+            value={filterTags}
+            mode={tagMode}
+            onChange={setFilterTags}
+            onModeChange={setTagMode}
+          />
           <input
             aria-label="Desde"
             type="date"
@@ -278,19 +316,42 @@ export function Movements({ onImport }: { onImport: () => void }) {
               className="button small"
               onClick={() =>
                 run(
-                  db.transaction("rw", db.movements, async () => {
-                    for (const id of selected)
-                      await db.movements.update(id, {
-                        categoryId: batchCategory || undefined,
-                        categorySource: "manual",
-                        aiSuggestion: undefined,
-                      });
-                  }),
+                  assignCategory(selected, batchCategory),
                   "Categorías actualizadas",
                 )
               }
             >
               Asignar
+            </button>
+            <TagPicker
+              label="Etiquetas para el lote"
+              value={batchTags}
+              onChange={setBatchTags}
+              tags={data.tags}
+            />
+            <button
+              className="button small"
+              disabled={!batchTags.length}
+              onClick={() =>
+                run(
+                  changeTags(selected, batchTags, "add"),
+                  "Etiquetas añadidas",
+                )
+              }
+            >
+              Añadir etiquetas
+            </button>
+            <button
+              className="button small"
+              disabled={!batchTags.length}
+              onClick={() =>
+                run(
+                  changeTags(selected, batchTags, "remove"),
+                  "Etiquetas retiradas",
+                )
+              }
+            >
+              Quitar etiquetas
             </button>
             <select
               aria-label="Tipo de relación"
@@ -398,6 +459,9 @@ export function Movements({ onImport }: { onImport: () => void }) {
                         {m.notes && (
                           <small className="note-text">{m.notes}</small>
                         )}
+                        <div className="movement-tags">
+                          <TagChips ids={m.tagIds} tags={data.tags} />
+                        </div>
                         <span className="row-symbols">
                           {data.relations.some((r) =>
                             r.movementIds.includes(m.id),
@@ -420,11 +484,10 @@ export function Movements({ onImport }: { onImport: () => void }) {
                             className="suggestion"
                             onClick={() =>
                               run(
-                                db.movements.update(m.id, {
-                                  categoryId: m.aiSuggestion!.categoryId,
-                                  categorySource: "manual",
-                                  aiSuggestion: undefined,
-                                }),
+                                assignCategory(
+                                  [m.id],
+                                  m.aiSuggestion!.categoryId,
+                                ),
                                 "Sugerencia confirmada",
                               )
                             }
@@ -521,6 +584,9 @@ function MovementEditor({
 }) {
   const { data, run, notify, setDirty } = useApp();
   const [m, setM] = useState(movement);
+  const [categoryChanged, setCategoryChanged] = useState(false);
+  const [pendingTags, setPendingTags] = useState<Tag[]>([]);
+  const [saveError, setSaveError] = useState("");
   const [amount, setAmount] = useState(
     (m.amount / 10 ** currencyDigits(m.currency))
       .toFixed(currencyDigits(m.currency))
@@ -542,23 +608,24 @@ function MovementEditor({
             const next = {
               ...m,
               amount: parseAmount(amount, ",", m.currency),
-              categorySource: "manual" as const,
-              aiSuggestion: undefined,
             };
             next.fingerprint = fingerprint(next);
-            for (const relation of data.relations.filter((r) =>
-              r.movementIds.includes(next.id),
-            ))
-              validateRelation(
-                relation.type,
-                data.movements
-                  .filter((row) => relation.movementIds.includes(row.id))
-                  .map((row) => (row.id === next.id ? next : row)),
-              );
-            if (await run(db.movements.put(next), "Movimiento guardado"))
+            if (
+              await run(
+                saveEditedMovement(next, categoryChanged, pendingTags).catch(
+                  (e) => {
+                    setSaveError(e instanceof Error ? e.message : String(e));
+                    throw e;
+                  },
+                ),
+                "Movimiento guardado",
+              )
+            )
               onClose();
           } catch (error) {
-            notify(String(error));
+            setSaveError(
+              error instanceof Error ? error.message : String(error),
+            );
           }
         }}
       >
@@ -596,10 +663,34 @@ function MovementEditor({
           <Field label="Categoría">
             <CategorySelect
               value={m.categoryId || ""}
-              onChange={(id) => setM({ ...m, categoryId: id || undefined })}
+              onChange={(id) => {
+                setDirty(true);
+                setCategoryChanged(true);
+                setM({ ...m, categoryId: id || undefined });
+              }}
               categories={data.categories}
             />
           </Field>
+        </div>
+        <div className="field">
+          <span>Etiquetas</span>
+          <TagPicker
+            tags={[...data.tags, ...pendingTags]}
+            value={m.tagIds}
+            onChange={(tagIds) => {
+              setDirty(true);
+              setM({ ...m, tagIds });
+            }}
+            onCreate={(name) => {
+              const existing = [...data.tags, ...pendingTags].find(
+                (t) => t.normalizedName === normalize(name),
+              );
+              const tag = existing || makeTag(name);
+              if (!existing) setPendingTags([...pendingTags, tag]);
+              setDirty(true);
+              setM({ ...m, tagIds: [...new Set([...m.tagIds, tag.id])] });
+            }}
+          />
         </div>
         <Field label="Notas">
           <textarea
@@ -632,6 +723,11 @@ function MovementEditor({
               </button>
             </div>
           ))}
+        {saveError && (
+          <p className="notice" role="alert">
+            {saveError}
+          </p>
+        )}
         <div className="modal-actions">
           <button className="button primary">Guardar cambios</button>
         </div>

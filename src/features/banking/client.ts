@@ -295,6 +295,7 @@ export function normalizeBankTransactions(
           : undefined,
         timestamp,
         categorySource: "none",
+        tagIds: [],
         notes: "",
         source: "Enable Banking",
         externalId: r.entry_reference || r.transaction_id || undefined,

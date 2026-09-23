@@ -1,3 +1,4 @@
+import { validAutomaticCategory } from "../data/classification";
 import { useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import {
@@ -214,21 +215,32 @@ export function AIPage() {
                     data.movements,
                   );
                   await run(
-                    db.transaction("rw", db.movements, async () => {
-                      for (const row of result) {
-                        const latest = await db.movements.get(row.id);
-                        if (
-                          latest &&
-                          (latest.categorySource === "none" ||
-                            latest.categorySource === "ai")
-                        )
-                          await db.movements.update(row.id, {
-                            categoryId: row.categoryId,
-                            categorySource: row.categorySource,
-                            aiSuggestion: row.aiSuggestion,
-                          });
-                      }
-                    }),
+                    db.transaction(
+                      "rw",
+                      [db.movements, db.categories],
+                      async () => {
+                        const categories = new Set(
+                          (await db.categories.toArray()).map((c) => c.id),
+                        );
+                        for (const proposal of result) {
+                          const row = validAutomaticCategory(
+                            proposal,
+                            categories,
+                          );
+                          const latest = await db.movements.get(row.id);
+                          if (
+                            latest &&
+                            (latest.categorySource === "none" ||
+                              latest.categorySource === "ai")
+                          )
+                            await db.movements.update(row.id, {
+                              categoryId: row.categoryId,
+                              categorySource: row.categorySource,
+                              aiSuggestion: row.aiSuggestion,
+                            });
+                        }
+                      },
+                    ),
                     "Categorización terminada. Revisa las sugerencias en Movimientos.",
                   );
                 } catch (e) {

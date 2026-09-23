@@ -10,15 +10,16 @@ export const helpTopics = {
   thanks: "¡De nada! Aquí estoy si necesitas otra consulta.",
   goodbye: "¡Hasta pronto!",
   overview:
-    "Abre la pantalla «Resumen» para ver tus finanzas. Abre «Movimientos» para importar archivos, buscar y revisar operaciones. «Cuentas» gestiona cuentas y monedas. «Categorías» organiza categorías. «Reglas» automatiza la asignación de categorías. «Suscripciones» revisa recurrencias. «Mapa» muestra ubicaciones. «IA local» prepara modelos. «Ajustes» gestiona copias y preferencias. Estos son los nombres exactos de las pantallas. Tanu puede buscar por fechas o palabras y obtener mínimos, máximos, medias y medianas. El chat no modifica datos.",
+    "Abre la pantalla «Resumen» para ver tus finanzas. Abre «Movimientos» para importar archivos, buscar y revisar operaciones. «Cuentas» gestiona cuentas y monedas. «Categorías» organiza el árbol de categorías y «Etiquetas» gestiona agrupaciones transversales. «Reglas» automatiza la asignación de categorías. «Suscripciones» revisa recurrencias. «Mapa» muestra ubicaciones. «IA local» prepara modelos. «Ajustes» gestiona copias y preferencias. Estos son los nombres exactos de las pantallas. Tanu puede buscar por fechas o palabras y obtener mínimos, máximos, medias y medianas. El chat no modifica datos.",
   import:
     "En Movimientos, pulsa Importar y arrastra o selecciona un CSV, Excel o PDF con texto. Elige la cuenta de destino y revisa la vista previa. Opciones avanzadas permite corregir columnas, fechas, hojas o páginas. Revisa las coincidencias antes de confirmar: nada se guarda hasta que confirmas. Los PDF escaneados no tienen OCR.",
   accounts:
     "En Cuentas puedes crear y gestionar tus cuentas y su moneda. Al importar, elige la cuenta de destino. Las monedas se muestran por separado y no se convierten automáticamente. El saldo importado de cada movimiento es histórico, no se recalcula al filtrar.",
   movements:
-    "En Movimientos puedes filtrar por texto, fechas, cuenta, categoría y moneda, revisar detalles, editar operaciones y exportarlas. Puedes relacionar transferencias internas y devoluciones. El chat solo consulta: para modificar un movimiento usa esa pantalla.",
+    "En Movimientos puedes filtrar por texto, fechas, cuenta, categoría con todos sus descendientes, etiquetas y moneda, revisar detalles, editar operaciones y exportarlas. Puedes relacionar transferencias internas y devoluciones. El chat solo consulta: para modificar un movimiento usa esa pantalla.",
   categories:
-    "En Categorías puedes organizar categorías y subcategorías. Asigna categorías en Movimientos, individualmente o en lote. Las categorías manuales se respetan; después se aplican reglas y finalmente sugerencias de IA local.",
+    "En Categorías puedes organizar un árbol de profundidad libre. Cada movimiento admite una categoría, incluso una que tenga hijas. Busca por nombre y selecciona su ruta completa. En Etiquetas puedes crear, renombrar y eliminar agrupaciones independientes. Cada movimiento admite varias etiquetas; puedes crearlas al editarlo y añadirlas o quitarlas en lote. Eliminar una categoría elimina toda su rama y sus reglas y deja los movimientos sin categoría, previa confirmación del alcance. Eliminar una etiqueta solo retira sus asignaciones. Las categorías manuales se respetan; después se aplican reglas y finalmente sugerencias de IA local.",
+  tags: "En Etiquetas puedes crear y renombrar agrupaciones como Vacaciones Japón o Laura. Cada movimiento admite varias etiquetas independientes de su categoría. Se asignan desde Movimientos individualmente o en lote; puedes crear una etiqueta desde el editor. Al eliminar una etiqueta se indica cuántos movimientos perderán esa asignación; los movimientos se conservan. Tanu puede filtrar consultas por etiquetas.",
   rules:
     "En Reglas puedes configurar condiciones para categorizar movimientos. Se aplican en orden de prioridad y gana la primera coincidencia; no sobrescriben categorías manuales. Revisa las propuestas antes de aplicarlas al historial.",
   recurrences:
@@ -43,6 +44,7 @@ export const helpRoutes: Partial<Record<HelpTopic, string>> = {
   movements: "/movimientos",
   accounts: "/cuentas",
   categories: "/categorias",
+  tags: "/etiquetas",
   rules: "/reglas",
   recurrences: "/suscripciones",
   map: "/mapa",

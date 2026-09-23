@@ -1,3 +1,5 @@
+import { categoryTree } from "../lib/classification";
+export { CategorySelect } from "./Classification";
 import {
   createContext,
   useContext,
@@ -61,10 +63,12 @@ export function CategoryBadge({
   categories: Category[];
 }) {
   const category = categories.find((c) => c.id === id);
-  const parent = categories.find((c) => c.id === category?.parentId);
+  const path = categoryTree(categories).path(id);
   return (
     <span
       className="category-badge"
+      tabIndex={category ? 0 : undefined}
+      aria-label={path || "Sin categorizar"}
       style={{
         color: category?.color || "#7b827d",
         backgroundColor: `${category?.color || "#7b827d"}16`,
@@ -73,8 +77,11 @@ export function CategoryBadge({
       {category ? (
         <>
           <CategoryIcon name={category.icon} size={12} />
-          {parent ? `${parent.name} · ` : ""}
+
           {category.name}
+          <span className="category-full-path" aria-hidden="true">
+            {path}
+          </span>
         </>
       ) : (
         "Sin categorizar"
@@ -139,42 +146,6 @@ export function Field({
       {children}
       {hint && <small>{hint}</small>}
     </label>
-  );
-}
-export function CategorySelect({
-  value,
-  onChange,
-  categories,
-  required = false,
-}: {
-  value: string;
-  onChange: (id: string) => void;
-  categories: Category[];
-  required?: boolean;
-}) {
-  return (
-    <select
-      aria-label="Categoría"
-      value={value}
-      required={required}
-      onChange={(e) => onChange(e.target.value)}
-    >
-      <option value="">Sin categorizar</option>
-      {categories
-        .filter((c) => !c.parentId)
-        .map((c) => (
-          <optgroup key={c.id} label={c.name}>
-            <option value={c.id}>{c.name}</option>
-            {categories
-              .filter((child) => child.parentId === c.id)
-              .map((child) => (
-                <option key={child.id} value={child.id}>
-                  {c.name} · {child.name}
-                </option>
-              ))}
-          </optgroup>
-        ))}
-    </select>
   );
 }
 export function Modal({

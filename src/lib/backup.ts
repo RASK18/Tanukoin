@@ -1,3 +1,4 @@
+import { makeTag, validateCategoryTree } from "./classification";
 import { db, readSnapshot } from "../data/db";
 import type { Snapshot } from "../data/types";
 import { parseDate, validateRelation } from "./finance";
@@ -6,6 +7,7 @@ const tables = [
   "accounts",
   "movements",
   "categories",
+  "tags",
   "rules",
   "recurrences",
   "relations",
@@ -37,6 +39,7 @@ const fields: Record<(typeof tables)[number], string[]> = {
     "balance",
     "timestamp",
     "categoryId",
+    "tagIds",
     "categorySource",
     "notes",
     "source",
@@ -47,6 +50,7 @@ const fields: Record<(typeof tables)[number], string[]> = {
     "createdAt",
   ],
   categories: ["id", "name", "color", "icon", "parentId", "description"],
+  tags: ["id", "name", "normalizedName"],
   rules: [
     "id",
     "name",
@@ -97,11 +101,13 @@ const required: Record<(typeof tables)[number], Record<string, string>> = {
     merchant: "string",
     date: "string",
     categorySource: "string",
+    tagIds: "object",
     notes: "string",
     source: "string",
     fingerprint: "string",
     createdAt: "string",
   },
+  tags: { name: "string", normalizedName: "string" },
   categories: {
     name: "string",
     color: "string",
@@ -162,12 +168,12 @@ export function validateBackup(input: unknown): Snapshot {
   const envelope = input as Record<string, unknown>;
   if (
     envelope.app !== "Tanukoin" ||
-    envelope.schemaVersion !== 1 ||
+    envelope.schemaVersion !== 2 ||
     !envelope.data ||
     typeof envelope.data !== "object"
   )
     throw new Error(
-      "Copia incompatible: se requiere formato Tanukoin, esquema 1",
+      "Copia incompatible: se requiere formato Tanukoin, esquema 2. Las copias antiguas del esquema 1 no se importan; exporta una copia nueva desde la aplicación actualizada.",
     );
   const data = envelope.data as Record<string, unknown>;
   if (
@@ -349,14 +355,22 @@ export function validateBackup(input: unknown): Snapshot {
       (m.categoryId && !categoryIds.has(m.categoryId))
     )
       throw new Error("Movimiento con referencia inexistente");
-  for (const c of s.categories)
+  validateCategoryTree(s.categories);
+  const tagIds = new Set(s.tags.map((t) => t.id)),
+    tagNames = new Set<string>();
+  for (const tag of s.tags) {
+    const expected = makeTag(tag.name, tag.id).normalizedName;
+    if (tag.normalizedName !== expected || tagNames.has(expected))
+      throw new Error("Etiqueta duplicada o nombre normalizado inválido");
+    tagNames.add(expected);
+  }
+  for (const movement of s.movements)
     if (
-      c.parentId &&
-      (!categoryIds.has(c.parentId) ||
-        s.categories.find((p) => p.id === c.parentId)?.parentId ||
-        c.parentId === c.id)
+      !Array.isArray(movement.tagIds) ||
+      movement.tagIds.some((id) => typeof id !== "string" || !tagIds.has(id)) ||
+      new Set(movement.tagIds).size !== movement.tagIds.length
     )
-      throw new Error("Jerarquía de categorías inválida");
+      throw new Error("Etiquetas de movimiento inválidas");
   for (const r of s.rules)
     if (
       (r.accountId && !accountIds.has(r.accountId)) ||
@@ -405,7 +419,7 @@ export async function exportBackup() {
   return JSON.stringify(
     {
       app: "Tanukoin",
-      schemaVersion: 1,
+      schemaVersion: 2,
       exportedAt: new Date().toISOString(),
       data: await readSnapshot(),
     },

@@ -1,3 +1,4 @@
+import { categoryTree } from "../../lib/classification";
 import type { Snapshot } from "../../data/types";
 import { generateChat } from "./chat-runtime";
 import { type ChatMessage, type Generate, type Generation } from "./chat-types";
@@ -255,7 +256,10 @@ export async function askAssistant(
   const interpreted = await structured(
     intentPrompt(today, previous, {
       accounts: data.accounts.map((a) => a.name).slice(0, 30),
-      categories: data.categories.map((c) => c.name).slice(0, 60),
+      categories: categoryTree(data.categories)
+        .options.map((c) => c.path)
+        .slice(0, 60),
+      tags: data.tags.map((t) => t.name).slice(0, 60),
     }),
     draftSchema,
     (value) => {

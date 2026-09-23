@@ -74,4 +74,26 @@ it("informa del progreso real por lotes y reutiliza la caché sin cambiar catego
   await categorize(movements, categories, [], progress);
   expect(progress.mock.calls).toEqual([[33, 33]]);
   expect(embed).not.toHaveBeenCalled();
+  movements[1].tagIds = ["japan"];
+  const tree = [
+    { ...categories[0], id: "root", name: "Gastos" },
+    { ...categories[0], parentId: "root" },
+  ];
+  const tagged = await categorize(movements, tree, [], progress);
+  expect(tagged[1].tagIds).toEqual(["japan"]);
+  expect((await db.embeddings.get("category:food"))?.text).toBe(
+    "Gastos → Comida: Alimentación",
+  );
+  embed.mockClear();
+  await categorize(
+    movements,
+    [{ ...tree[0], name: "Hogar" }, tree[1]],
+    [],
+    progress,
+  );
+  expect(embed).toHaveBeenCalledWith([
+    "Hogar: Alimentación",
+    "Hogar → Comida: Alimentación",
+  ]);
+  expect((await db.models.get("embeddings"))?.ready).toBe(true);
 });

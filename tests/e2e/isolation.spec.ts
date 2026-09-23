@@ -228,6 +228,7 @@ test("mapas, búsqueda pública, puente de extensión y descarga bajo aislamient
       fingerprint: "ficticio",
       createdAt: "2026-09-20",
       categorySource: "none",
+      tagIds: [],
     });
     await new Promise<void>((resolve) => (tx.oncomplete = () => resolve()));
     database.close();

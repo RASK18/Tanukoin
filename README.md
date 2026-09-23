@@ -9,7 +9,7 @@ Finanzas personales en español, en tu navegador. PWA estática sin backend, ana
 ## Funciones
 
 - CSV, XLS/XLSX y PDF con texto: columnas configurables, perfiles, corrección y revisión de duplicados antes de guardar.
-- Cuentas, categorías de dos niveles, notas, edición en lote y relaciones de transferencia/devolución.
+- Cuentas, categorías jerárquicas sin límite fijo de niveles, etiquetas independientes, notas, edición en lote y relaciones de transferencia/devolución.
 - Reglas por prioridad que respetan categorías manuales, con revisión para aplicarlas al historial.
 - Resumen, gráficos y calendario semanal, mensual y anual. Monedas separadas, sin conversión automática.
 - Google Timeline: `semanticSegments`, `timelineObjects` y `Records.json`. Ubicaciones sugeridas o confirmadas y corrección manual.
@@ -25,7 +25,21 @@ Puedes preguntar «¿Cuál es el mayor gasto este mes?», «Busca nóminas de es
 
 Las estadísticas son **por movimiento y moneda**, sin convertir divisas. Para gastos se utiliza el valor absoluto de los cargos y se excluyen transferencias internas y devoluciones positivas; los totales mantienen su cálculo neto habitual. Los límites de una estadística acotada son inclusivos. La truncación elimina el porcentaje indicado **de cada extremo**, redondeando hacia abajo el número de filas; la mediana simétricamente truncada no cambia. Si faltan límites o porcentaje, Tanu pide aclaración. Los resultados se redondean a la unidad mínima de cada moneda y muestran filtros y movimientos utilizados.
 
-La búsqueda por palabras incluye concepto, comercio, notas y categorías, con un vocabulario local de sinónimos para nómina, factura, supermercado y alquiler. No garantiza reconocer todos los comercios o conceptos. La ayuda usa textos revisados sobre funciones reales. Sin modelo vigente preparado, el chat muestra una guía breve y el enlace a IA local. No responde mediante reglas ni descarga modelos automáticamente.
+La búsqueda por palabras incluye concepto, comercio, notas, rutas completas de categorías y etiquetas, con un vocabulario local de sinónimos para nómina, factura, supermercado y alquiler. No garantiza reconocer todos los comercios o conceptos. La ayuda usa textos revisados sobre funciones reales. Sin modelo vigente preparado, el chat muestra una guía breve y el enlace a IA local. No responde mediante reglas ni descarga modelos automáticamente.
+
+### Categorías y etiquetas
+
+Cada movimiento admite una categoría o puede quedar sin categorizar. Las categorías forman un árbol de profundidad libre y se puede asignar un nodo que tenga hijas. Los selectores buscan por nombre o ruta completa: por ejemplo, «vuelo» encuentra «Viajes → Transporte → Vuelos». Los filtros por categoría incluyen toda su rama. El resumen muestra categorías principales y permite entrar en sus niveles, separando los movimientos asignados directamente a cada nodo.
+
+Las etiquetas agrupan movimientos de cualquier categoría. Puedes buscarlas, crear una al editar un movimiento y añadir o quitar varias mediante chips. Crear una etiqueta desde el editor solo se confirma al guardar; cancelar no la conserva. La pantalla Etiquetas permite renombrarlas o eliminarlas, y Movimientos permite añadirlas o quitarlas en lote sin reemplazar las demás. Los nombres equivalentes por espacios, mayúsculas o tildes reutilizan la etiqueta existente. Los filtros admiten todas las seleccionadas, cualquiera o movimientos sin etiquetas.
+
+Mover una categoría conserva sus descendientes y asignaciones. Eliminarla requiere confirmar el alcance: se elimina toda la rama y las reglas que apuntan a ella; los movimientos permanecen sin categoría, conservan sus etiquetas y quedan protegidos de la categorización automática. Eliminar una etiqueta solo retira esa etiqueta de los movimientos. Editar etiquetas no cambia el origen manual, por regla o IA de la categoría.
+
+Puedes preguntar a Tanu «Gastos con la etiqueta Vacaciones Japón» o «Gastos de la categoría Viajes». Ante categorías con nombres iguales, la aplicación pide concretar su ruta. Las etiquetas no se heredan entre movimientos relacionados ni se asignan mediante reglas o IA. Los cargos previstos del resumen mantienen su alcance por mes y moneda porque las recurrencias no tienen categorías ni etiquetas propias.
+
+Las copias completas utilizan el formato 2 e incluyen árbol, etiquetas y asignaciones. Se rechazan las copias anteriores del formato 1 sin alterar los datos; desde una instalación actualizada puedes exportar una copia nueva. El CSV exporta la ruta de categoría y los nombres de etiquetas, pero la restauración completa se realiza mediante JSON.
+
+Para probar el catálogo inicial nuevo, ejecuta `pnpm dev` y abre `http://127.0.0.1:5173/Tanukoin/` en un perfil de navegador de pruebas nuevo. Crea una cuenta e importa un CSV ficticio. Tu perfil habitual conserva sus categorías y modelos al actualizar; no necesitas borrar su almacenamiento. El catálogo se inserta únicamente en la primera inicialización, no reaparece al eliminar categorías.
 
 ### Entorno
 
@@ -106,7 +120,7 @@ GitHub Actions comprueba tipos, pruebas unitarias, compilación y pruebas de nav
 
 El versionado sigue Schedulime: `major.minor` del paquete y número de commits, con respaldo al patch del paquete. `APP_VERSION` y `APP_UPDATED_AT` permiten sobrescribirlo. Se genera `version.json` y se comprueba al abrir, reconectar o volver a la pestaña, como máximo una vez cada 15 minutos. **Actualizar ahora** espera al service worker y se desactiva durante operaciones o ediciones pendientes.
 
-Actualizar conserva IndexedDB y las cachés independientes de modelos. El esquema actual es 1. Las futuras migraciones deberán añadirse mediante `db.version(...).upgrade(...)` y probarse con una base anterior.
+Actualizar conserva IndexedDB y las cachés independientes de modelos. El esquema actual es 2. La actualización desde el esquema 1 conserva datos y modelos e inicializa las etiquetas vacías; no reorganiza categorías existentes. Las futuras migraciones deberán añadirse mediante `db.version(...).upgrade(...)` y probarse con una base anterior.
 
 ## Extensión bancaria
 

@@ -1,3 +1,9 @@
+import { categoryTree, matchesTags, type TagMode } from "../lib/classification";
+import {
+  CategorySelect,
+  TagFilter,
+  TagChips,
+} from "../components/Classification";
 import { getActiveChatModel } from "../features/ai/model-store";
 import { useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
@@ -52,11 +58,25 @@ export function Dashboard({ onImport }: { onImport: () => void }) {
   const showTanu = chatReady === false && !settings?.hideTanuWelcome;
   const [month, setMonth] = useState(localDate().slice(0, 7));
   const [currency, setCurrency] = useState(data.accounts[0]?.currency || "EUR");
+  const [category, setCategory] = useState(""),
+    [tagIds, setTagIds] = useState<string[]>([]),
+    [tagMode, setTagMode] = useState<TagMode>("all");
+  const tree = useMemo(() => categoryTree(data.categories), [data.categories]);
+  const branch = tree.branch(category);
+  const matches = (m: (typeof data.movements)[number]) =>
+    (!category ||
+      (category === "uncategorized"
+        ? !m.categoryId
+        : !!m.categoryId && branch.has(m.categoryId))) &&
+    matchesTags(m, tagIds, tagMode);
+  const financial = financialRows(data.movements, data.relations).filter(
+    matches,
+  );
   const factor = 10 ** currencyDigits(currency);
   const currencies = [
     ...new Set(["EUR", ...data.accounts.map((a) => a.currency)]),
   ];
-  const rows = data.movements.filter(
+  const rows = financial.filter(
       (m) => m.date.startsWith(month) && m.currency === currency,
     ),
     t = totals(rows, data.relations, data.movements);
@@ -65,24 +85,36 @@ export function Dashboard({ onImport }: { onImport: () => void }) {
     for (const m of financialRows(rows, data.relations, data.movements))
       if (m.amount < 0 || m.isRefund)
         map.set(
-          m.categoryId || "",
-          (map.get(m.categoryId || "") || 0) - m.amount,
+          tree.group(
+            m.categoryId,
+            category === "uncategorized" ? undefined : category,
+          ),
+          (map.get(
+            tree.group(
+              m.categoryId,
+              category === "uncategorized" ? undefined : category,
+            ),
+          ) || 0) - m.amount,
         );
     return [...map.entries()]
       .filter(([, value]) => value > 0)
       .map(([id, value]) => ({
+        id,
         name:
-          data.categories.find((c) => c.id === id)?.name || "Sin categorizar",
+          id && id === category
+            ? "Asignados directamente"
+            : data.categories.find((c) => c.id === id)?.name ||
+              "Sin categorizar",
         color: data.categories.find((c) => c.id === id)?.color || "#a8b3a8",
         value: value / factor,
       }));
-  }, [rows, data.categories, data.relations, data.movements]);
+  }, [rows, data.categories, data.relations, data.movements, tree, category]);
   const evolution = Array.from({ length: 6 }, (_, i) => {
     const date = new Date(`${month}-15T12:00:00`);
     date.setMonth(date.getMonth() - 5 + i);
     const key = localDate(date).slice(0, 7);
     const v = totals(
-      data.movements.filter(
+      financial.filter(
         (m) => m.date.startsWith(key) && m.currency === currency,
       ),
       data.relations,
@@ -107,7 +139,10 @@ export function Dashboard({ onImport }: { onImport: () => void }) {
     (sum, r) => sum + Math.abs(r.amount),
     0,
   );
-  const recent = [...rows]
+  const recent = data.movements
+    .filter(
+      (m) => m.date.startsWith(month) && m.currency === currency && matches(m),
+    )
     .sort((a, b) => b.date.localeCompare(a.date))
     .slice(0, 5);
   return (
@@ -232,6 +267,32 @@ export function Dashboard({ onImport }: { onImport: () => void }) {
           )}
         </div>
       )}
+      <section
+        className="card classification-summary-filters"
+        aria-label="Filtrar movimientos del resumen"
+      >
+        <div className="field">
+          <span>Categoría y descendientes</span>
+          <CategorySelect
+            label="Categoría del resumen"
+            value={category}
+            onChange={setCategory}
+            categories={data.categories}
+            emptyLabel="Todas las categorías"
+            filter
+          />
+        </div>
+        <div className="field">
+          <span>Etiquetas de los movimientos</span>
+          <TagFilter
+            value={tagIds}
+            mode={tagMode}
+            tags={data.tags}
+            onChange={setTagIds}
+            onModeChange={setTagMode}
+          />
+        </div>
+      </section>
       <div className="metrics">
         {[
           {
@@ -260,7 +321,7 @@ export function Dashboard({ onImport }: { onImport: () => void }) {
             amount: totalRecurring,
             Icon: CalendarDays,
             color: "plum",
-            detail: `${upcoming.length} vencimientos este mes`,
+            detail: `${upcoming.length} vencimientos este mes · sin filtros de categoría o etiquetas`,
           },
         ].map(({ label, amount, Icon, color, detail }) => (
           <section className="metric card" key={label}>
@@ -281,6 +342,22 @@ export function Dashboard({ onImport }: { onImport: () => void }) {
             <h2>¿Dónde se va tu dinero?</h2>
             <span className="muted">Por categoría</span>
           </div>
+          {category && (
+            <nav className="category-breadcrumbs" aria-label="Ruta del gráfico">
+              <button className="text-button" onClick={() => setCategory("")}>
+                Todas las categorías
+              </button>
+              {tree.ancestors(category).map((c) => (
+                <button
+                  key={c.id}
+                  className="text-button"
+                  onClick={() => setCategory(c.id)}
+                >
+                  → {c.name}
+                </button>
+              ))}
+            </nav>
+          )}
           {byCategory.length ? (
             <div className="donut-layout">
               <div className="donut">
@@ -294,7 +371,7 @@ export function Dashboard({ onImport }: { onImport: () => void }) {
                       strokeWidth={3}
                     >
                       {byCategory.map((c) => (
-                        <Cell key={c.name} fill={c.color} />
+                        <Cell key={c.id} fill={c.color} />
                       ))}
                     </Pie>
                     <Tooltip
@@ -310,10 +387,15 @@ export function Dashboard({ onImport }: { onImport: () => void }) {
                 </div>
               </div>
               <ul className="chart-legend">
-                {byCategory.slice(0, 6).map((c) => (
+                {byCategory.map((c) => (
                   <li key={c.name}>
                     <i style={{ background: c.color }} />
-                    <span>{c.name}</span>
+                    <button
+                      disabled={!c.id || c.id === category}
+                      onClick={() => setCategory(c.id)}
+                    >
+                      {c.name}
+                    </button>
                     <strong>
                       {money(Math.round(c.value * factor), currency)}
                     </strong>
@@ -408,6 +490,7 @@ export function Dashboard({ onImport }: { onImport: () => void }) {
                           {m.merchant || m.description}
                         </Link>
                         <small>{displayDate(m.date)}</small>
+                        <TagChips ids={m.tagIds} tags={data.tags} />
                       </td>
                       <td>
                         <CategoryBadge

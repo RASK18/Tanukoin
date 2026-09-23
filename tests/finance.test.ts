@@ -21,6 +21,7 @@ const movement = (
   description: "Supermercado",
   merchant: "",
   date: "2026-09-15",
+  tagIds: [],
   categorySource: "none",
   notes: "",
   source: "test",

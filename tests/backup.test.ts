@@ -47,7 +47,7 @@ it("restaura datos atómicamente y no restaura consentimientos de red", async ()
   raw.data.movements[0].balance = "100";
   expect(() => validateBackup(raw)).toThrow();
 });
-it("acepta copias antiguas y rechaza preferencias de bienvenida inválidas", async () => {
+it("acepta preferencias opcionales ausentes y rechaza valores inválidos", async () => {
   const previousSettings = await db.settings.get("main");
   const raw = JSON.parse(await exportBackup());
   raw.data.settings[0].timezone = "Pacific/Auckland";
@@ -74,6 +74,6 @@ it("rechaza campos secretos, referencias rotas y versiones desconocidas sin borr
   await expect(restoreBackup(raw)).rejects.toThrow();
   expect((await db.accounts.get("a"))?.name).toBe("Original");
   delete raw.data.accounts[0].privateKey;
-  raw.schemaVersion = 2;
+  raw.schemaVersion = 999;
   expect(() => validateBackup(raw)).toThrow();
 });

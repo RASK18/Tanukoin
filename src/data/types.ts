@@ -30,6 +30,7 @@ export interface Movement {
   balance?: number;
   timestamp?: string;
   categoryId?: string;
+  tagIds: string[];
   categorySource: CategorySource;
   notes: string;
   source: string;
@@ -38,6 +39,11 @@ export interface Movement {
   importId?: string;
   aiSuggestion?: { categoryId: string; score: number };
   createdAt: string;
+}
+export interface Tag {
+  id: string;
+  name: string;
+  normalizedName: string;
 }
 export interface Rule {
   id: string;
@@ -158,6 +164,7 @@ export interface Snapshot {
   accounts: Account[];
   movements: Movement[];
   categories: Category[];
+  tags: Tag[];
   rules: Rule[];
   recurrences: Recurrence[];
   relations: Relation[];
@@ -170,6 +177,7 @@ export const emptySnapshot = (): Snapshot => ({
   accounts: [],
   movements: [],
   categories: [],
+  tags: [],
   rules: [],
   recurrences: [],
   relations: [],

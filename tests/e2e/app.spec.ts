@@ -185,7 +185,10 @@ test("cuenta, importación CSV, edición, exportación y reimportación con dupl
   await page
     .getByRole("button", { name: "Editar Compra supermercado" })
     .click();
-  await page.getByLabel("Categoría", { exact: true }).selectOption("food");
+  await page
+    .getByRole("combobox", { name: "Categoría", exact: true })
+    .fill("Alimentación");
+  await page.getByRole("option", { name: "Alimentación", exact: true }).click();
   await page.getByLabel("Notas", { exact: true }).fill("Compra semanal");
   await page.getByRole("button", { name: "Guardar cambios" }).click();
   await expect(page.getByText("Compra semanal", { exact: true })).toBeVisible();

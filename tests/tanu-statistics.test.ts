@@ -19,6 +19,7 @@ function fixture(amounts = [1000, 2000, 3000, 4000, 100000]) {
     notes: "",
     source: "test",
     fingerprint: `m${i}`,
+    tagIds: [],
     categorySource: "none",
     createdAt: "2026-09-15",
   }));

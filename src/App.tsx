@@ -1,3 +1,4 @@
+import { Categories, TagsPage } from "./pages/ClassificationPage";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Route, Routes } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
@@ -23,7 +24,7 @@ import { emptySnapshot } from "./data/types";
 import { AppContext } from "./components/ui";
 import { Dashboard } from "./pages/Dashboard";
 import { Movements } from "./pages/Movements";
-import { Accounts, Categories, Rules, Subscriptions } from "./pages/Manage";
+import { Accounts, Rules, Subscriptions } from "./pages/Manage";
 import { MapPage } from "./pages/MapPage";
 import { AIPage } from "./pages/AIPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -35,6 +36,7 @@ const links = [
   ["/movimientos", "Movimientos", ArrowDownUp],
   ["/cuentas", "Cuentas", WalletCards],
   ["/categorias", "Categorías", Tags],
+  ["/etiquetas", "Etiquetas", Tags],
   ["/reglas", "Reglas", Workflow],
   ["/suscripciones", "Suscripciones", CalendarDays],
   ["/mapa", "Mapa", MapPinned],
@@ -304,6 +306,7 @@ export function App() {
           />
           <Route path="/cuentas" element={<Accounts />} />
           <Route path="/categorias" element={<Categories />} />
+          <Route path="/etiquetas" element={<TagsPage />} />
           <Route path="/reglas" element={<Rules />} />
           <Route path="/suscripciones" element={<Subscriptions />} />
           <Route path="/mapa" element={<MapPage />} />

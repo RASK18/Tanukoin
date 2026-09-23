@@ -1,3 +1,4 @@
+import { categoryTree } from "../../lib/classification";
 import { db } from "../../data/db";
 import type { Category, Movement } from "../../data/types";
 import { normalize } from "../../lib/finance";
@@ -145,10 +146,11 @@ export async function categorize(
 ): Promise<Movement[]> {
   if (!(await db.models.get("embeddings"))?.ready || !categories.length)
     return movements;
+  const tree = categoryTree(categories);
   const categoryVectors = await vectors(
     categories.map((c) => ({
       id: `category:${c.id}`,
-      text: `${c.name}: ${c.description}`,
+      text: `${tree.path(c.id)}: ${c.description}`,
     })),
   );
   const confirmed = examples

@@ -44,7 +44,7 @@ React 19, TypeScript, Vite, Dexie/IndexedDB, vite-plugin-pwa/Workbox y rutas con
 | Recursos locales de lectores e IA  | `scripts/prepare-assets.mjs`                                           |
 | Pruebas                            | `tests/*.test.ts`, `tests/e2e/`                                        |
 
-El esquema IndexedDB es 1. Los campos opcionales `Movement.balance` y `ImportProfile.columns.balance` se añadieron sin cambiar índices ni inventar valores para datos antiguos. Una modificación futura del esquema que requiera migración debe ser transaccional y probarse desde datos anteriores.
+El esquema IndexedDB es 2. La migración desde 1 añade la tabla `tags`, su índice único de nombre normalizado y el índice multivalor `Movement.tagIds`, inicializando las listas vacías. Conserva categorías, movimientos, ajustes, reglas y modelos. `Movement.balance` e `ImportProfile.columns.balance` siguen siendo opcionales, sin inventar valores históricos. Las migraciones son transaccionales.
 
 ## Entorno de desarrollo: Rollup en Windows
 
@@ -55,7 +55,7 @@ El esquema IndexedDB es 1. Los campos opcionales `Movement.balance` y `ImportPro
 ## Funciones existentes
 
 - Importación CSV, XLS/XLSX y PDF con texto mediante worker, vista previa, corrección y guardado confirmado. Perfiles reutilizables, exportación CSV y copias completas JSON.
-- Varias cuentas, categorías con un nivel de subcategorías, notas, edición individual/en lote y relaciones entre movimientos.
+- Varias cuentas, categorías de profundidad libre, etiquetas independientes, notas, edición individual/en lote y relaciones entre movimientos.
 - Transferencias internas excluidas de ingresos/gastos globales; devoluciones vinculadas reducen el gasto relacionado. Reglas ordenadas por prioridad y primera coincidencia, con protección de categorías manuales.
 - Resumen, gráficos, búsquedas y calendario de recurrencias semanales, mensuales y anuales. Los vencimientos inexistentes se ajustan al final del mes.
 - Importación de Google Timeline: `semanticSegments`, `timelineObjects` y `Records.json`; asignaciones geográficas sugeridas o confirmadas, con corrección manual.
@@ -63,6 +63,20 @@ El esquema IndexedDB es 1. Los campos opcionales `Movement.balance` y `ImportPro
 - Tutorial y conexión bancaria mediante extensión; gestión de modelos, almacenamiento y conexiones externas en Ajustes/IA local.
 
 La presencia de una función en código no sustituye las validaciones reales pendientes indicadas más abajo.
+
+## Categorías jerárquicas y etiquetas
+
+- Se conserva `Category.parentId` y una única `Movement.categoryId` opcional. `src/lib/classification.ts` centraliza rutas, antecesores, descendientes, validación de ciclos, agrupación por nivel y filtros de etiquetas. Los recorridos no imponen un máximo de profundidad ni requieren recursión.
+- `Tag` contiene `id`, `name` y `normalizedName`; `Movement.tagIds` y `Snapshot.tags` guardan las asignaciones. Se normalizan espacios, mayúsculas y tildes para evitar duplicados de etiquetas; nombres visibles e identificadores permanecen separados. Las categorías pueden repetir nombre en ramas distintas; crear, renombrar o mover valida que no se duplique un nombre equivalente entre hermanos.
+- Categorías muestra el árbol desplegable y permite crear raíces o hijas, renombrar, mover ramas y eliminar. El movimiento de una rama conserva identificadores, reglas y asignaciones y muestra su alcance. Por decisión del usuario, eliminar una categoría borra también todos sus descendientes y reglas que los referencian; los movimientos quedan sin categoría, con origen manual y conservando sus etiquetas. La confirmación muestra cantidades y se revalida el alcance dentro de la transacción. También se retiran sugerencias y vectores de las categorías eliminadas. Un fallo revierte la operación completa.
+- Etiquetas es una pantalla independiente para crear, renombrar y eliminar. El editor de movimientos permite buscar, asignar varias, quitarlas y crear nuevas al guardar; cancelar descarta las etiquetas pendientes. Las acciones en lote añaden o retiran etiquetas sin sustituir las restantes. Editar solo etiquetas o notas conserva el origen de categoría; cambiar la categoría la marca manual. El guardado revalida referencias, incluidas respuestas automáticas y ediciones abiertas antes de una eliminación.
+- El catálogo nuevo se usa solo en instalaciones nuevas: Alimentación, Transporte, Vivienda, Ocio, Viajes, Salud, Compras, Ingresos y Otros, con descendientes habituales; Viajes incluye Transporte → Vuelos/Tren y Alojamiento → Hotel/Apartamento. La actualización conserva el árbol existente. No se regenera el catálogo al borrar categorías. Para probarlo desde cero basta un perfil de navegador de pruebas; no hace falta borrar el perfil habitual ni sus modelos.
+- Selectores con búsqueda por nombre/ruta, teclado y selección de nodos intermedios. Los listados muestran el nombre corto y ofrecen la ruta al enfocar o pasar el ratón. Búsqueda textual de movimientos incluye antecesores y etiquetas. Filtros por rama completa y etiquetas: todas, cualquiera o sin etiquetas.
+- Resumen filtra ingresos, gastos, balance, evolución y movimientos recientes. El gráfico agrupa por raíces o hijas del nodo seleccionado y separa las asignaciones directas, sin doble conteo. Los cargos previstos y el calendario siguen filtrados solo por mes y moneda. Se conserva el tratamiento contable de transferencias/devoluciones; las etiquetas pertenecen al movimiento y no se heredan por relaciones.
+- Reglas y embeddings admiten toda la profundidad. Los textos de embeddings incluyen la ruta completa, por lo que mover/renombrar antecesores invalida esos vectores mediante la caché existente. No se borran modelos ni se asignan etiquetas automáticamente. Tanu acepta nombres/rutas y filtros de etiquetas validados; pide concretar nombres de categoría ambiguos. Comparte la lógica de ramas y agrupación con la interfaz y permanece de solo consulta.
+- Copias JSON de formato 2 con validación de referencias, listas de etiquetas, unicidad y ciclos antes de restaurar. No hay conversión del formato 1, según el alcance acordado para desarrollo temprano: se rechaza sin escribir datos. CSV añade etiquetas y usa rutas completas de categorías; para restaurar toda la clasificación se utiliza JSON. La restauración mantiene su confirmación y desactiva conexiones externas.
+- Validación: comprobación de tipos y compilación; 105 pruebas unitarias y 33 pruebas de navegador en Edge superadas. Incluyen migración desde esquema 1, eliminación atómica con reversión ante fallo, referencias tardías, copias, filtros, edición en lote, navegación de cuatro niveles, teclado, renombrado/eliminación de etiquetas, 320/390 px y reinicio offline. Las tres pruebas opcionales de modelos reales se omiten: los cambios de embeddings y consultas se comprueban con datos ficticios y simulación, sin nuevas descargas ni inferencias reales.
+- Sin nuevas dependencias, backend, alta manual de movimientos ni publicación. Trabajo separado del commit previo `5177ec6`, que recoge únicamente los cambios anteriores de IA local.
 
 ## Navegación y distribución
 

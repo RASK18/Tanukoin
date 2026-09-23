@@ -157,9 +157,9 @@ export function SettingsPage() {
           <ShieldCheck size={19} />
         </div>
         <p>
-          Guarda tus movimientos, reglas, categorías y ubicaciones en un
-          archivo. No contiene claves PEM, tokens bancarios ni modelos de IA. El
-          archivo contiene datos personales sin cifrar: guárdalo en un lugar
+          Guarda tus movimientos, reglas, categorías, etiquetas y ubicaciones en
+          un archivo. No contiene claves PEM, tokens bancarios ni modelos de IA.
+          El archivo contiene datos personales sin cifrar: guárdalo en un lugar
           privado.
         </p>
         <div className="button-row">
@@ -304,8 +304,10 @@ export function SettingsPage() {
         >
           <p>
             La copia contiene {backup.data.accounts.length} cuentas,{" "}
-            {backup.data.movements.length} movimientos y{" "}
-            {backup.data.locations.length} ubicaciones.
+            {backup.data.movements.length} movimientos,{" "}
+            {backup.data.categories.length} categorías,{" "}
+            {backup.data.tags.length} etiquetas y {backup.data.locations.length}{" "}
+            ubicaciones.
           </p>
           <div className="notice warning">
             Se sustituirán todos los datos locales actuales. Descarga una copia

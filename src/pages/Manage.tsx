@@ -1,3 +1,4 @@
+import { categoryTree } from "../lib/classification";
 import { useState } from "react";
 import {
   Plus,
@@ -12,13 +13,7 @@ import {
   ArrowRight,
 } from "lucide-react";
 import { db } from "../data/db";
-import type {
-  Account,
-  Category,
-  Rule,
-  Recurrence,
-  Movement,
-} from "../data/types";
+import type { Account, Rule, Recurrence, Movement } from "../data/types";
 import {
   useApp,
   PageTitle,
@@ -26,7 +21,6 @@ import {
   Field,
   Modal,
   CategorySelect,
-  CategoryIcon,
   AccountSelect,
 } from "../components/ui";
 import {
@@ -251,221 +245,6 @@ export function Accounts() {
     </>
   );
 }
-export function Categories() {
-  const { data, run, notify, setDirty } = useApp();
-  const [editing, setEditing] = useState<Category>();
-  function edit(c?: Category) {
-    setEditing(
-      c
-        ? { ...c }
-        : {
-            id: id(),
-            name: "",
-            color: "#6f9c7f",
-            icon: "Folder",
-            description: "",
-          },
-    );
-  }
-  async function remove(c: Category) {
-    if (
-      data.categories.some((x) => x.parentId === c.id) ||
-      data.movements.some((m) => m.categoryId === c.id) ||
-      data.rules.some((r) => r.categoryId === c.id)
-    ) {
-      notify("Reasigna antes sus movimientos, reglas o subcategorías.");
-      return;
-    }
-    if (confirm(`¿Eliminar la categoría ${c.name}?`))
-      await run(db.categories.delete(c.id), "Categoría eliminada");
-  }
-  return (
-    <>
-      <PageTitle
-        title="Cada cosa en su lugar"
-        description="Categorías y subcategorías que hablan tu idioma."
-        action={
-          <button className="button primary" onClick={() => edit()}>
-            <Plus size={16} /> Nueva categoría
-          </button>
-        }
-      />
-      <div className="category-grid">
-        {data.categories
-          .filter((c) => !c.parentId)
-          .map((c) => (
-            <section className="card category-card" key={c.id}>
-              <div className="card-heading">
-                <span className="category-heading">
-                  <span
-                    className="feature-icon"
-                    style={{ background: `${c.color}18`, color: c.color }}
-                  >
-                    <CategoryIcon name={c.icon} size={24} />
-                  </span>
-                  <h2>{c.name}</h2>
-                </span>
-                <div className="button-row">
-                  <button
-                    className="icon-button"
-                    aria-label={`Editar ${c.name}`}
-                    onClick={() => edit(c)}
-                  >
-                    <Pencil size={15} />
-                  </button>
-                  <button
-                    className="icon-button"
-                    aria-label={`Eliminar ${c.name}`}
-                    onClick={() => remove(c)}
-                  >
-                    <Trash2 size={15} />
-                  </button>
-                </div>
-              </div>
-              <p>{c.description}</p>
-              <div className="subcategory-list">
-                {data.categories
-                  .filter((child) => child.parentId === c.id)
-                  .map((child) => (
-                    <div key={child.id}>
-                      <span>{child.name}</span>
-                      <button
-                        className="icon-button"
-                        aria-label={`Editar ${child.name}`}
-                        onClick={() => edit(child)}
-                      >
-                        <Pencil size={13} />
-                      </button>
-                      <button
-                        className="icon-button"
-                        aria-label={`Eliminar ${child.name}`}
-                        onClick={() => remove(child)}
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
-                  ))}
-                <button
-                  className="text-link"
-                  onClick={() =>
-                    setEditing({
-                      id: id(),
-                      name: "",
-                      parentId: c.id,
-                      color: c.color,
-                      icon: c.icon,
-                      description: "",
-                    })
-                  }
-                >
-                  <Plus size={13} /> Añadir subcategoría
-                </button>
-              </div>
-            </section>
-          ))}
-      </div>
-      {editing && (
-        <Modal
-          title="Editar categoría"
-          onClose={() => {
-            setDirty(false);
-            setEditing(undefined);
-          }}
-        >
-          <form
-            data-editor
-            onSubmit={async (e) => {
-              e.preventDefault();
-              if (await run(db.categories.put(editing), "Categoría guardada"))
-                setEditing(undefined);
-            }}
-          >
-            <div className="form-grid">
-              <Field label="Nombre">
-                <input
-                  required
-                  value={editing.name}
-                  onChange={(e) =>
-                    setEditing({ ...editing, name: e.target.value })
-                  }
-                />
-              </Field>
-              <Field label="Categoría padre">
-                <select
-                  disabled={data.categories.some(
-                    (c) => c.parentId === editing.id,
-                  )}
-                  value={editing.parentId || ""}
-                  onChange={(e) =>
-                    setEditing({
-                      ...editing,
-                      parentId: e.target.value || undefined,
-                    })
-                  }
-                >
-                  <option value="">Categoría principal</option>
-                  {data.categories
-                    .filter((c) => !c.parentId && c.id !== editing.id)
-                    .map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                </select>
-              </Field>
-              <Field label="Color">
-                <input
-                  type="color"
-                  value={editing.color}
-                  onChange={(e) =>
-                    setEditing({ ...editing, color: e.target.value })
-                  }
-                />
-              </Field>
-              <Field label="Icono">
-                <select
-                  value={editing.icon}
-                  onChange={(e) =>
-                    setEditing({ ...editing, icon: e.target.value })
-                  }
-                >
-                  {[
-                    "Folder",
-                    "House",
-                    "ShoppingBasket",
-                    "TrainFront",
-                    "Utensils",
-                    "Gamepad2",
-                    "HeartPulse",
-                    "ShoppingBag",
-                    "Wallet",
-                    "Ellipsis",
-                  ].map((icon) => (
-                    <option key={icon}>{icon}</option>
-                  ))}
-                </select>
-              </Field>
-            </div>
-            <Field
-              label="Descripción para la IA"
-              hint="Por ejemplo: panadería, supermercado y compra semanal."
-            >
-              <textarea
-                value={editing.description}
-                onChange={(e) =>
-                  setEditing({ ...editing, description: e.target.value })
-                }
-              />
-            </Field>
-            <div className="modal-actions">
-              <button className="button primary">Guardar categoría</button>
-            </div>
-          </form>
-        </Modal>
-      )}
-    </>
-  );
-}
 export function Rules() {
   const { data, run, notify, setDirty } = useApp();
   const [editing, setEditing] = useState<Rule>();
@@ -566,8 +345,8 @@ export function Rules() {
                       <td>
                         <strong>{r.name}</strong>
                         <small>
-                          {data.categories.find((c) => c.id === r.categoryId)
-                            ?.name || "Solo notas"}
+                          {categoryTree(data.categories).path(r.categoryId) ||
+                            "Solo notas"}
                         </small>
                       </td>
                       <td>
@@ -693,7 +472,23 @@ export function Rules() {
                   throw new Error(
                     "Elige una categoría o una nota como acción.",
                   );
-                if (await run(db.rules.put(rule), "Regla guardada"))
+                if (
+                  await run(
+                    db.transaction(
+                      "rw",
+                      [db.rules, db.categories],
+                      async () => {
+                        if (
+                          rule.categoryId &&
+                          !(await db.categories.get(rule.categoryId))
+                        )
+                          throw new Error("La categoría ya no existe.");
+                        await db.rules.put(rule);
+                      },
+                    ),
+                    "Regla guardada",
+                  )
+                )
                   setEditing(undefined);
               } catch (e) {
                 notify(String(e));
@@ -808,7 +603,7 @@ export function Rules() {
               <li key={m.id}>
                 {m.description}
                 <ArrowRight size={13} />
-                {data.categories.find((c) => c.id === m.categoryId)?.name ||
+                {categoryTree(data.categories).path(m.categoryId) ||
                   "Sin categoría"}{" "}
                 {m.notes && `· ${m.notes}`}
               </li>
@@ -821,12 +616,13 @@ export function Rules() {
               onClick={async () => {
                 if (
                   await run(
-                    db.transaction("rw", db.movements, async () => {
+                    db.transaction("rw", [db.movements, db.rules], async () => {
+                      const currentRules = await db.rules.toArray();
                       for (const row of preview) {
                         const current = await db.movements.get(row.id);
                         if (current)
                           await db.movements.put(
-                            applyRules(current, data.rules),
+                            applyRules(current, currentRules),
                           );
                       }
                     }),

@@ -1,3 +1,9 @@
+import {
+  categoryTree,
+  matchesTags,
+  movementSearchText,
+  type TagMode,
+} from "../../lib/classification";
 import type { Snapshot, Movement } from "../../data/types";
 import {
   financialRows,
@@ -23,12 +29,21 @@ const keywords = [
     "alcampo",
     "consum",
   ],
-  ["alquiler", "alquileres", "arrendamiento", "arrendamientos", "renta vivienda"],
+  [
+    "alquiler",
+    "alquileres",
+    "arrendamiento",
+    "arrendamientos",
+    "renta vivienda",
+  ],
 ];
-function matchesKeyword(query: string, movement: Movement, data: Snapshot) {
-  const category = data.categories.find((c) => c.id === movement.categoryId);
-  const parent = data.categories.find((c) => c.id === category?.parentId);
-  const text = ` ${normalize([movement.description, movement.merchant, movement.notes, category?.name, parent?.name].filter(Boolean).join(" ")).replace(/[^a-z0-9]+/g, " ")} `;
+function matchesKeyword(
+  query: string,
+  movement: Movement,
+  data: Snapshot,
+  tree: ReturnType<typeof categoryTree>,
+) {
+  const text = ` ${movementSearchText(movement, tree, data.tags).replace(/[^a-z0-9]+/g, " ")} `;
   const term = normalize(query).trim();
   const aliases = keywords.find(
     (group) =>
@@ -57,6 +72,8 @@ export interface QuerySpec {
   to?: string;
   accountId?: string;
   categoryId?: string;
+  tagIds?: string[];
+  tagMode?: TagMode;
   currency?: string;
   text?: string;
   direction?: "expense" | "income" | "all";
@@ -95,6 +112,8 @@ export function validateQuery(
     "to",
     "accountId",
     "categoryId",
+    "tagIds",
+    "tagMode",
     "currency",
     "text",
     "direction",
@@ -125,9 +144,25 @@ export function validateQuery(
     ].includes(q.op)
   )
     throw new Error("Consulta no permitida.");
-  for (const [key, v] of Object.entries(q))
-    if (typeof v !== "string" || v.length > 500)
+  for (const [key, v] of Object.entries(q)) {
+    if (key === "tagIds") {
+      if (
+        !Array.isArray(v) ||
+        v.length > 100 ||
+        v.some(
+          (id) =>
+            typeof id !== "string" ||
+            id.length > 500 ||
+            !data.tags.some((t) => t.id === id),
+        ) ||
+        new Set(v).size !== v.length
+      )
+        throw new Error("Etiquetas de consulta inválidas.");
+    } else if (typeof v !== "string" || v.length > 500)
       throw new Error(`Parámetro inválido: ${key}`);
+  }
+  if (q.tagMode && !["all", "any", "none"].includes(q.tagMode))
+    throw new Error("Modo de etiquetas inválido.");
   for (const key of ["from", "to", "comparisonFrom", "comparisonTo"] as const)
     if (
       q[key] &&
@@ -201,11 +236,14 @@ export function validateQuery(
         "Los períodos de comparación requieren la operación compare.",
       );
   }
-  if (q.op === "recurrences" && q.categoryId)
+  if (
+    q.op === "recurrences" &&
+    (q.categoryId || q.tagIds?.length || q.tagMode === "none")
+  )
     return {
       op: "clarify",
       question:
-        "Las recurrencias no tienen categoría propia. ¿Quieres buscar los movimientos de esa categoría?",
+        "Las recurrencias no tienen categoría ni etiquetas propias. ¿Quieres buscar los movimientos con esos filtros?",
     };
   if (
     q.op === "merchant" &&
@@ -255,12 +293,10 @@ export function executeQuery(
   if (q.op === "clarify")
     return { text: q.question, rows: [] as Movement[], filters: "" };
   const statistic = ["min", "max", "mean", "median"].includes(q.op);
-  const categoryIds = new Set([
-    q.categoryId,
-    ...data.categories
-      .filter((c) => c.parentId === q.categoryId)
-      .map((c) => c.id),
-  ]);
+  const tree = categoryTree(data.categories);
+  const categoryIds = q.categoryId
+    ? tree.branch(q.categoryId)
+    : new Set<string>();
   const select = (from = q.from, to = q.to) =>
     (q.op === "search" || q.op === "locations"
       ? data.movements.map((m) => ({ ...m, isRefund: false }))
@@ -270,10 +306,11 @@ export function executeQuery(
         (!from || m.date >= from) &&
         (!to || m.date <= to) &&
         (!q.accountId || m.accountId === q.accountId) &&
-        (!q.categoryId || categoryIds.has(m.categoryId)) &&
+        (!q.categoryId || categoryIds.has(m.categoryId || "")) &&
+        matchesTags(m, q.tagIds || [], q.tagMode) &&
         (!q.currency || m.currency === q.currency) &&
-        (!q.text || matchesKeyword(q.text, m, data)) &&
-        (!q.excludeText || !matchesKeyword(q.excludeText, m, data)) &&
+        (!q.text || matchesKeyword(q.text, m, data, tree)) &&
+        (!q.excludeText || !matchesKeyword(q.excludeText, m, data, tree)) &&
         (q.minAmount === undefined ||
           Math.abs(m.amount) >= Number(q.minAmount)) &&
         (q.maxAmount === undefined ||
@@ -290,9 +327,12 @@ export function executeQuery(
     q.accountId
       ? data.accounts.find((a) => a.id === q.accountId)?.name
       : "Todas las cuentas",
-    q.categoryId
-      ? data.categories.find((c) => c.id === q.categoryId)?.name
-      : "Todas las categorías",
+    q.categoryId ? tree.path(q.categoryId) : "Todas las categorías",
+    q.tagMode === "none"
+      ? "Sin etiquetas"
+      : q.tagIds?.length
+        ? `Etiquetas (${q.tagMode === "any" ? "cualquiera" : "todas"}): ${q.tagIds.map((id) => data.tags.find((t) => t.id === id)?.name).join(", ")}`
+        : null,
     q.text && `Texto: ${q.text}`,
     q.excludeText && `Excluir: ${q.excludeText}`,
     q.minAmount !== undefined &&
@@ -432,17 +472,23 @@ export function executeQuery(
       const current = rows.filter((m) => m.currency === currency),
         t = totals(current, data.relations, data.movements);
       if (q.op === "group") {
-        const cats = [...new Set(current.map((m) => m.categoryId))];
+        const cats = [
+          ...new Set(
+            current.map((m) => tree.group(m.categoryId, q.categoryId)),
+          ),
+        ];
         return (
           `${currency}\n` +
           cats
             .map((id) => {
               const amount = totals(
-                current.filter((m) => m.categoryId === id),
+                current.filter(
+                  (m) => tree.group(m.categoryId, q.categoryId) === id,
+                ),
                 data.relations,
                 data.movements,
               );
-              return `${data.categories.find((c) => c.id === id)?.name || "Sin categorizar"}: ${money(q.direction === "income" ? amount.income : amount.expense, currency)}`;
+              return `${(id && id === q.categoryId ? "Asignados directamente" : tree.path(id)) || "Sin categorizar"}: ${money(q.direction === "income" ? amount.income : amount.expense, currency)}`;
             })
             .join("\n")
         );
