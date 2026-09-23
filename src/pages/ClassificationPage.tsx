@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Pencil, Plus, Search, Trash2 } from "lucide-react";
 import type { Tag } from "../data/types";
 import { deleteTag, saveTag } from "../data/classification";
 import { normalize } from "../lib/finance";
 import { Empty, Field, Modal, PageTitle, useApp } from "../components/ui";
+import "./tags-page.css";
 export { Categories } from "./CategoriesPage";
 
 export function TagsPage() {
@@ -36,21 +37,25 @@ export function TagsPage() {
           </button>
         }
       />
-      <section className="card">
-        <Field label="Buscar etiquetas">
+      <section className="card tags-page">
+        <label className="tags-search">
+          <Search size={21} aria-hidden="true" />
           <input
+            type="search"
+            className="tags-search-input"
+            aria-label="Buscar etiquetas"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Vacaciones Japón, Laura…"
+            placeholder="Buscar etiquetas…"
           />
-        </Field>
-        <ul className="classification-tree">
+        </label>
+        <ul className="tags-grid">
           {[...data.tags]
             .filter((t) => normalize(t.name).includes(normalize(search)))
             .sort((a, b) => a.name.localeCompare(b.name, "es"))
             .map((tag) => (
-              <li className="classification-row" key={tag.id}>
-                <div className="category-info">
+              <li className="tag-card" key={tag.id}>
+                <div className="tag-card-info">
                   <strong>{tag.name}</strong>
                   <small>
                     {
@@ -67,14 +72,14 @@ export function TagsPage() {
                     setEditing({ tag: { ...tag }, creating: false })
                   }
                 >
-                  <Pencil size={16} />
+                  <Pencil size={20} />
                 </button>
                 <button
                   className="icon-button"
                   aria-label={`Eliminar ${tag.name}`}
                   onClick={() => setDeleting(tag)}
                 >
-                  <Trash2 size={16} />
+                  <Trash2 size={20} />
                 </button>
               </li>
             ))}

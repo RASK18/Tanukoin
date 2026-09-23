@@ -17,8 +17,6 @@ import {
   Trash2,
   X,
   Check,
-  Tags,
-  Lightbulb,
   Search,
   Expand,
   FoldVertical,
@@ -494,30 +492,6 @@ export function Categories() {
         }
       />
       <section className="card category-editor">
-        <div className="category-panel-heading">
-          <div className="category-panel-title">
-            <span className="category-title-icon">
-              <Tags size={25} />
-            </span>
-            <div>
-              <h2>Categorías</h2>
-              <p>
-                Organiza tus finanzas con categorías y subcategorías. Puedes
-                crear, editar, reordenar y personalizarlas.
-              </p>
-            </div>
-          </div>
-          <aside className="category-tip">
-            <Lightbulb size={22} />
-            <div>
-              <strong>Consejo</strong>
-              <p>
-                Usa categorías claras para entender mejor en qué gastas tu
-                dinero.
-              </p>
-            </div>
-          </aside>
-        </div>
         <div className="category-toolbar">
           <label className="category-search">
             <Search size={18} />
