@@ -741,6 +741,7 @@ test("muestra jerarquía sin rutas, respeta hover y permite cancelar la reorgani
       .evaluateAll((els) => els.map((e) => e.getAttribute("data-category-id"))),
   ).toEqual(original);
   await page.reload();
+  await expect(page.locator('[data-depth="0"]')).toHaveCount(original.length);
   expect(
     await page
       .locator('[data-depth="0"]')

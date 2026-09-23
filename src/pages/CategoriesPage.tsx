@@ -190,7 +190,7 @@ function CategoryFields({
     color !== category.color;
   return (
     <form
-      className="category-fields"
+      className={"category-fields" + (changed ? " is-editing" : "")}
       aria-label={creating ? "Nueva categoría" : "Editar " + path}
       onSubmit={async (e) => {
         e.preventDefault();
@@ -227,26 +227,61 @@ function CategoryFields({
               );
             }}
           />
-          <input
-            className="category-name"
-            aria-label={
-              creating ? "Nombre de nueva categoría" : "Nombre de " + path
-            }
-            autoFocus={creating}
-            required
-            value={name}
-            placeholder="Nombre de la categoría"
-            onChange={(e) => {
-              setName(e.target.value);
-              onDirty(
-                category.id,
-                creating ||
-                  e.target.value !== category.name ||
-                  icon !== category.icon ||
-                  color !== category.color,
-              );
-            }}
-          />
+          <div
+            className={"category-name-edit" + (changed ? " has-changes" : "")}
+          >
+            <input
+              className="category-name"
+              aria-label={
+                creating ? "Nombre de nueva categoría" : "Nombre de " + path
+              }
+              autoFocus={creating}
+              required
+              value={name}
+              placeholder="Nombre de la categoría"
+              onChange={(e) => {
+                setName(e.target.value);
+                onDirty(
+                  category.id,
+                  creating ||
+                    e.target.value !== category.name ||
+                    icon !== category.icon ||
+                    color !== category.color,
+                );
+              }}
+            />
+            {changed && (
+              <div className="category-save">
+                <button
+                  className="button primary small"
+                  disabled={saving}
+                  type="submit"
+                >
+                  <Check size={14} />
+                  {saving ? "Guardando…" : "Guardar"}
+                </button>
+                <button
+                  className="icon-button category-cancel"
+                  type="button"
+                  aria-label={
+                    creating
+                      ? "Cancelar nueva categoría"
+                      : "Descartar cambios de " + path
+                  }
+                  onClick={() => {
+                    setName(category.name);
+                    setIcon(category.icon);
+                    setColor(category.color);
+                    setError("");
+                    onDirty(category.id, false);
+                    onCancel?.();
+                  }}
+                >
+                  <X size={18} strokeWidth={3} />
+                </button>
+              </div>
+            )}
+          </div>
         </div>
         <label
           className="category-color"
@@ -275,37 +310,6 @@ function CategoryFields({
           {creating ? "—" : count || 0}
         </span>
         <div className="category-row-actions">{!creating && actions}</div>
-        {changed && (
-          <div className="category-save">
-            <button
-              className="button primary small"
-              disabled={saving}
-              type="submit"
-            >
-              <Check size={14} />
-              {saving ? "Guardando…" : "Guardar"}
-            </button>
-            <button
-              className="icon-button"
-              type="button"
-              aria-label={
-                creating
-                  ? "Cancelar nueva categoría"
-                  : "Descartar cambios de " + path
-              }
-              onClick={() => {
-                setName(category.name);
-                setIcon(category.icon);
-                setColor(category.color);
-                setError("");
-                onDirty(category.id, false);
-                onCancel?.();
-              }}
-            >
-              <X size={16} />
-            </button>
-          </div>
-        )}
       </fieldset>
       {error && (
         <p className="category-error" role="alert">
