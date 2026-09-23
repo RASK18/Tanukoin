@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useRef,
+  useId,
   type ReactNode,
 } from "react";
 import { X, Leaf } from "lucide-react";
@@ -129,6 +130,7 @@ export function Field({
     </label>
   );
 }
+const openModals = new Set<HTMLDialogElement>();
 export function Modal({
   title,
   children,
@@ -141,23 +143,34 @@ export function Modal({
   wide?: boolean;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
   const { setBusy } = useApp();
   useEffect(() => {
-    dialog.current?.showModal();
+    const element = dialog.current!;
+    const opener = document.activeElement as HTMLElement | null;
+    openModals.add(element);
+    element.showModal();
     setBusy(true);
-    return () => setBusy(false);
+    return () => {
+      element.close();
+      openModals.delete(element);
+      setBusy(openModals.size > 0);
+      if (opener?.isConnected) opener.focus();
+    };
   }, [setBusy]);
   return (
     <dialog
       ref={dialog}
+      aria-labelledby={titleId}
       className={wide ? "modal wide" : "modal"}
       onCancel={(e) => {
         e.preventDefault();
+        e.stopPropagation();
         onClose();
       }}
     >
       <div className="modal-heading">
-        <h2>{title}</h2>
+        <h2 id={titleId}>{title}</h2>
         <button className="icon-button" aria-label="Cerrar" onClick={onClose}>
           <X size={20} />
         </button>

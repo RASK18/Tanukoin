@@ -233,7 +233,7 @@ test("filtra ramas y etiquetas, edita en lote y exporta/restaura el formato nuev
   await page.getByRole("button", { name: "Descargar copia completa" }).click();
   const backupPath = (await (await backupPromise).path())!;
   const backup = JSON.parse(await readFile(backupPath, "utf8"));
-  expect(backup.schemaVersion).toBe(2);
+  expect(backup.schemaVersion).toBe(3);
   expect(backup.data.tags).toHaveLength(2);
   expect(
     backup.data.movements.find((m: any) => m.id === "hotel").categorySource,
@@ -512,7 +512,7 @@ test("edita en línea, elige emojis, arrastra y conserva el orden al recargar", 
     .click();
   await expect(page.getByRole("dialog").getByRole("textbox")).toHaveCount(1);
   await page
-    .getByLabel("Descripción para la IA", { exact: true })
+    .getByRole("textbox", { name: "Descripción para la IA", exact: true })
     .fill("Comidas ficticias");
   await page.getByRole("button", { name: "Guardar descripción" }).click();
   await page

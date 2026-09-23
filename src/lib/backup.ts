@@ -13,7 +13,6 @@ const tables = [
   "relations",
   "locations",
   "assignments",
-  "profiles",
   "settings",
 ] as const;
 const fields: Record<(typeof tables)[number], string[]> = {
@@ -87,7 +86,6 @@ const fields: Record<(typeof tables)[number], string[]> = {
   relations: ["id", "type", "movementIds"],
   locations: ["id", "lat", "lng", "start", "end", "accuracy", "name", "source"],
   assignments: ["id", "movementId", "locationId", "status", "evidence"],
-  profiles: ["id", "name", "headerRow", "dateFormat", "decimal", "columns"],
   settings: [
     "id",
     "maps",
@@ -156,13 +154,6 @@ const required: Record<(typeof tables)[number], Record<string, string>> = {
     status: "string",
     evidence: "string",
   },
-  profiles: {
-    name: "string",
-    headerRow: "number",
-    dateFormat: "string",
-    decimal: "string",
-    columns: "object",
-  },
   settings: {
     maps: "boolean",
     search: "boolean",
@@ -176,12 +167,12 @@ export function validateBackup(input: unknown): Snapshot {
   const envelope = input as Record<string, unknown>;
   if (
     envelope.app !== "Tanukoin" ||
-    envelope.schemaVersion !== 2 ||
+    envelope.schemaVersion !== 3 ||
     !envelope.data ||
     typeof envelope.data !== "object"
   )
     throw new Error(
-      "Copia incompatible: se requiere formato Tanukoin, esquema 2. Las copias antiguas del esquema 1 no se importan; exporta una copia nueva desde la aplicación actualizada.",
+      "Copia incompatible: se requiere formato Tanukoin, esquema 3. No se convierten copias de versiones anteriores.",
     );
   const data = envelope.data as Record<string, unknown>;
   if (
@@ -303,33 +294,6 @@ export function validateBackup(input: unknown): Snapshot {
         throw new Error("Estado geográfico inválido");
       if (table === "categories" && !/^#[\da-f]{6}$/i.test(String(row.color)))
         throw new Error("Color inválido");
-      if (table === "profiles") {
-        if (
-          !["DMY", "MDY", "YMD"].includes(String(row.dateFormat)) ||
-          ![",", "."].includes(String(row.decimal)) ||
-          !Number.isInteger(row.headerRow) ||
-          Number(row.headerRow) < 0
-        )
-          throw new Error("Perfil inválido");
-        const cols = row.columns as Record<string, unknown>;
-        if (
-          cols.balance !== undefined &&
-          (!Number.isInteger(cols.balance) || Number(cols.balance) < -1)
-        )
-          throw new Error("Columna de saldo inválida");
-        if (
-          [
-            "date",
-            "description",
-            "amount",
-            "debit",
-            "credit",
-            "merchant",
-            "externalId",
-          ].some((k) => !Number.isInteger(cols[k]) || Number(cols[k]) < -1)
-        )
-          throw new Error("Columnas inválidas");
-      }
     }
   }
   const s = data as unknown as Snapshot;
@@ -428,7 +392,7 @@ export async function exportBackup() {
   return JSON.stringify(
     {
       app: "Tanukoin",
-      schemaVersion: 2,
+      schemaVersion: 3,
       exportedAt: new Date().toISOString(),
       data: await readSnapshot(),
     },

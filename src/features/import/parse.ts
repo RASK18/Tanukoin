@@ -1,9 +1,16 @@
-import type { Account, ImportProfile, Movement } from "../../data/types";
+import type { Account, Movement } from "../../data/types";
 import { parseAmount, parseDate, fingerprint } from "../../lib/finance";
-import type { Candidate } from "./types";
-export const defaultProfile: ImportProfile = {
-  id: "",
-  name: "",
+import type { Candidate, DetectedLayout } from "./types";
+export function explicitCurrencies(text: string): string[] {
+  const currencies = [
+    ...text.matchAll(
+      /(?<![a-z])(EUR|USD|GBP|CHF|JPY|CAD|MXN|ARS|COP|CLP)(?![a-z])/gi,
+    ),
+  ].map((match) => match[1].toUpperCase());
+  if (text.includes("€")) currencies.push("EUR");
+  return [...new Set(currencies)];
+}
+export const defaultLayout: DetectedLayout = {
   headerRow: 0,
   dateFormat: "DMY",
   decimal: ",",
@@ -20,13 +27,14 @@ export const defaultProfile: ImportProfile = {
 };
 export function buildCandidates(
   rows: string[][],
-  profile: ImportProfile,
+  profile: DetectedLayout,
   account: Account,
   source: string,
   existing: Movement[],
-): { candidates: Candidate[]; errors: string[] } {
+): { candidates: Candidate[]; errors: string[]; warnings: string[] } {
   const candidates: Candidate[] = [],
-    errors: string[] = [];
+    errors: string[] = [],
+    warnings: string[] = [];
   const duplicateOfSaved = duplicateChecker(existing);
   const c = profile.columns;
   rows.slice(profile.headerRow + 1).forEach((row, index) => {
@@ -34,8 +42,60 @@ export function buildCandidates(
     if (!row.some((cell) => String(cell).trim())) return;
     try {
       const date = parseDate(row[c.date], profile.dateFormat);
-      const description = String(row[c.description] ?? "").trim();
-      if (!description) throw new Error("Falta el concepto");
+      const cell = (index: number | undefined) =>
+        String(row[index ?? -1] ?? "").trim();
+      const currencies = new Set(
+        [
+          cell(c.currency).toUpperCase(),
+          profile.currency,
+          ...explicitCurrencies(
+            [c.amount, c.debit, c.credit, c.balance, c.fee].map(cell).join(" "),
+          ),
+        ].filter((value): value is string => !!value),
+      );
+      if (currencies.size > 1)
+        throw new Error("El movimiento contiene monedas contradictorias");
+      const currency = [...currencies][0] || account.currency;
+      if (!/^[A-Z]{3}$/.test(currency) || currency !== account.currency)
+        throw new Error(
+          `La moneda ${currency} no coincide con la cuenta ${account.currency}`,
+        );
+      if (
+        profile.bank === "revolut" &&
+        !["COMPLETADO", "COMPLETED"].includes(cell(c.status).toUpperCase())
+      ) {
+        warnings.push(
+          `Fila ${rowNumber}: operación no completada; no se importará.`,
+        );
+        return;
+      }
+      const useful = (value: string) => (value && value !== "-" ? value : "");
+      const description =
+        profile.bank === "n26"
+          ? [
+              ...new Set(
+                [useful(cell(c.merchant)), useful(cell(c.reference))].filter(
+                  Boolean,
+                ),
+              ),
+            ].join(" · ") ||
+            useful(cell(c.type)) ||
+            "Sin concepto"
+          : cell(c.description) || "Sin concepto";
+      const notes: string[] = cell(c.notes) ? [cell(c.notes)] : [];
+      for (const [key, label] of [
+        ["valueDate", "Fecha valor"],
+        ["bookingDate", "Fecha contable / finalización"],
+      ] as const) {
+        const value = cell(c[key]);
+        if (value) {
+          parseDate(value, profile.dateFormat);
+          notes.push(`${label}: ${value}`);
+        }
+      }
+      const originalDate = cell(c.date);
+      if (/\d{2}:\d{2}/.test(originalDate))
+        notes.push(`Fecha de operación original: ${originalDate}`);
       let amount: number;
       if (c.amount >= 0)
         amount = parseAmount(row[c.amount], profile.decimal, account.currency);
@@ -54,9 +114,21 @@ export function buildCandidates(
             : 0;
         if (debit && credit)
           throw new Error("Debe y haber tienen importe simultáneamente");
-        if (!debit && !credit) throw new Error("Falta el importe");
+        if (!cell(c.debit) && !cell(c.credit))
+          throw new Error("Falta el importe");
         amount = credit - debit;
       }
+      if (profile.bank === "revolut" && cell(c.fee)) {
+        const fee = parseAmount(cell(c.fee), profile.decimal, currency);
+        if (fee < 0) throw new Error("La comisión no puede ser negativa");
+        if (fee)
+          notes.push(
+            `Importe original: ${cell(c.amount)} ${currency}. Comisión incluida: ${cell(c.fee)} ${currency}.`,
+          );
+        amount -= fee;
+      }
+      if (!Number.isSafeInteger(amount))
+        throw new Error("Importe fuera de rango");
       const m: Movement = {
         id: crypto.randomUUID(),
         accountId: account.id,
@@ -71,7 +143,15 @@ export function buildCandidates(
         date,
         categorySource: "none",
         tagIds: [],
-        notes: "",
+        notes: notes.join("\n"),
+        bookingDate: cell(c.bookingDate)
+          ? parseDate(cell(c.bookingDate), profile.dateFormat)
+          : undefined,
+        timestamp:
+          /^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(originalDate) &&
+          Number.isFinite(Date.parse(originalDate))
+            ? originalDate
+            : undefined,
         source,
         externalId:
           c.externalId >= 0
@@ -88,7 +168,7 @@ export function buildCandidates(
       );
     }
   });
-  return { candidates, errors };
+  return { candidates, errors, warnings };
 }
 
 export function duplicateChecker(existing: Movement[]) {

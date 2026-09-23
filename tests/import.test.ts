@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { buildCandidates, defaultProfile } from "../src/features/import/parse";
+import { buildCandidates, defaultLayout } from "../src/features/import/parse";
 const account = { id: "a", name: "Cuenta", bank: "", currency: "EUR" };
 it("no confunde coincidencias de importe con duplicados exactos", () => {
   const rows = [
@@ -7,12 +7,12 @@ it("no confunde coincidencias de importe con duplicados exactos", () => {
     ["15/09/2026", "Café", "-2,50"],
     ["15/09/2026", "Café", "-2,50"],
   ];
-  const first = buildCandidates(rows, defaultProfile, account, "test.csv", []);
+  const first = buildCandidates(rows, defaultLayout, account, "test.csv", []);
   expect(first.candidates.map((c) => c.duplicate)).toEqual(["none", "none"]);
   expect(first.candidates[1].selected).toBe(true);
   const second = buildCandidates(
     rows,
-    defaultProfile,
+    defaultLayout,
     account,
     "test.csv",
     first.candidates.map((c) => c.movement),
@@ -22,8 +22,8 @@ it("no confunde coincidencias de importe con duplicados exactos", () => {
 });
 it("reconoce identificadores bancarios y reporta errores por fila", () => {
   const profile = {
-    ...defaultProfile,
-    columns: { ...defaultProfile.columns, externalId: 3 },
+    ...defaultLayout,
+    columns: { ...defaultLayout.columns, externalId: 3 },
   };
   const result = buildCandidates(
     [
@@ -54,8 +54,8 @@ it("reconoce identificadores bancarios y reporta errores por fila", () => {
 
 it("compara fecha, importe, concepto y saldo solo con movimientos guardados de la misma cuenta", () => {
   const profile = {
-    ...defaultProfile,
-    columns: { ...defaultProfile.columns, balance: 3 },
+    ...defaultLayout,
+    columns: { ...defaultLayout.columns, balance: 3 },
   };
   const rows = [
     ["Fecha", "Concepto", "Importe", "Saldo"],

@@ -97,6 +97,32 @@ test("actualizar espera a cerrar la edición y conserva IndexedDB y cachés de m
     await expect(
       page.getByRole("button", { name: "Actualizar ahora" }),
     ).toBeEnabled();
+    await page.evaluate(() => {
+      location.hash = "#/movimientos";
+    });
+    await page.getByRole("button", { name: "Importar", exact: true }).click();
+    await page
+      .getByRole("button", { name: "Crear cuenta", exact: true })
+      .click();
+    await expect(
+      page.getByRole("dialog", { name: "Nueva cuenta", exact: true }),
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
+    const importer = page.getByRole("dialog", {
+      name: "Importar movimientos",
+      exact: true,
+    });
+    await expect(importer).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Actualizar ahora" }),
+    ).toBeDisabled();
+    await importer.getByRole("button", { name: "Cerrar", exact: true }).click();
+    await page.evaluate(() => {
+      location.hash = "#/cuentas";
+    });
+    await expect(
+      page.getByRole("button", { name: "Actualizar ahora" }),
+    ).toBeEnabled();
     await page.getByRole("button", { name: "Actualizar ahora" }).click();
     await expect(
       page.getByRole("heading", { name: "Conservar" }),

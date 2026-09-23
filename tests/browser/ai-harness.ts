@@ -14,7 +14,7 @@ import { chatFixture, chatScenarios } from "../ai-corpus";
 import { db } from "../../src/data/db";
 import {
   detectionPrompt,
-  validateDetectedProfile,
+  validateDetectedLayout,
 } from "../../src/features/import/detect";
 import type { Generation } from "../../src/features/ai/chat-types";
 export const harness = {
@@ -36,7 +36,7 @@ export const harness = {
     );
     return {
       response,
-      profile: validateDetectedProfile(JSON.parse(response), rows),
+      profile: validateDetectedLayout(JSON.parse(response), rows),
     };
   },
   scenarios: chatScenarios,

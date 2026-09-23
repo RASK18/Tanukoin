@@ -27,13 +27,14 @@
 - Guarda importes y saldos en unidades monetarias enteras. Separa monedas; no conviertas automáticamente. Conserva la precisión original de las fechas.
 - Las importaciones requieren revisión y confirmación antes de escribir en IndexedDB. Preserva los datos ante errores o cancelaciones.
 - Protege las categorías asignadas manualmente: después se aplican reglas y finalmente IA.
-- Actualizaciones y migraciones deben conservar datos, ajustes y modelos. No vacíes el almacenamiento para solucionar fallos.
+- Durante el desarrollo temprano no se exige retrocompatibilidad con datos, ajustes o copias anteriores ni implementar migraciones para conservarlos. El usuario puede borrar los datos del sitio para probar desde cero; no añadas borrados automáticos ni vacíes el almacenamiento para solucionar fallos. Los datos de la versión vigente deben protegerse ante errores y cancelaciones.
 
 ## Importación y duplicados
 
 - La zona de archivo admite arrastrar y soltar, selección por clic y teclado.
-- Muestra por defecto cuenta de destino y vista previa; agrupa configuración y perfiles en «Opciones avanzadas».
-- Detecta columnas y formatos localmente. Usa la IA local preparada para casos no reconocidos, validando su salida; no descargues modelos automáticamente ni añadas IA remota como alternativa.
+- Muestra cuenta de destino, «Crear cuenta» y vista previa normalizada. La detección es automática, sin perfiles guardados ni ajustes manuales de columnas y formatos.
+- La selección de páginas PDF usa «Todas las páginas» o rangos escritos como `1-29, 35, 40-50`, nunca una lista de checks individuales. La navegación de la vista previa es independiente.
+- Detecta columnas y formatos localmente, sin necesitar modelos. Para casos no reconocidos, ofrece IA local preparada solo a petición expresa del usuario y valida su salida. No descargues modelos automáticamente ni añadas IA remota como alternativa.
 - Compara duplicados solo con movimientos ya guardados en la misma cuenta, nunca entre filas o páginas del archivo que se está importando.
 - La comparación por contenido considera fecha, importe, concepto y saldo. Saldos distintos distinguen operaciones legítimas repetidas.
 - Si falta el saldo en cualquiera de las partes, muestra la incertidumbre y conserva la fila seleccionada para revisión. No inventes saldos históricos.

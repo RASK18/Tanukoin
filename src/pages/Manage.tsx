@@ -1,3 +1,4 @@
+import { AccountDialog } from "../components/AccountDialog";
 import { categoryTree } from "../lib/classification";
 import { useState } from "react";
 import {
@@ -25,8 +26,8 @@ import {
 } from "../components/ui";
 import {
   money,
-  parseAmount,
   currencyDigits,
+  parseAmount,
   applyRules,
   localDate,
   occurrences,
@@ -37,19 +38,10 @@ import {
 const id = () => crypto.randomUUID();
 
 export function Accounts() {
-  const { data, run, notify, setDirty } = useApp();
+  const { data, run, notify } = useApp();
   const [editing, setEditing] = useState<Account>();
-  const [opening, setOpening] = useState("");
   function edit(a?: Account) {
-    const row = a || { id: id(), name: "", bank: "", currency: "EUR" };
-    setEditing({ ...row });
-    setOpening(
-      row.openingBalance === undefined
-        ? ""
-        : (row.openingBalance / 10 ** currencyDigits(row.currency))
-            .toString()
-            .replace(".", ","),
-    );
+    setEditing(a || { id: id(), name: "", bank: "", currency: "EUR" });
   }
   return (
     <>
@@ -147,100 +139,13 @@ export function Accounts() {
         </section>
       )}
       {editing && (
-        <Modal
-          title={
-            data.accounts.some((a) => a.id === editing.id)
-              ? "Editar cuenta"
-              : "Nueva cuenta"
+        <AccountDialog
+          account={
+            data.accounts.some((a) => a.id === editing.id) ? editing : undefined
           }
-          onClose={() => {
-            setDirty(false);
-            setEditing(undefined);
-          }}
-        >
-          <form
-            data-editor
-            onSubmit={async (e) => {
-              e.preventDefault();
-              try {
-                const next = {
-                  ...editing,
-                  currency: editing.currency.toUpperCase(),
-                  openingBalance: opening.trim()
-                    ? parseAmount(opening, ",", editing.currency)
-                    : undefined,
-                };
-                if (await run(db.accounts.put(next), "Cuenta guardada"))
-                  setEditing(undefined);
-              } catch (e) {
-                notify(String(e));
-              }
-            }}
-          >
-            <div className="form-grid">
-              <Field label="Nombre">
-                <input
-                  autoFocus
-                  required
-                  maxLength={80}
-                  value={editing.name}
-                  onChange={(e) =>
-                    setEditing({ ...editing, name: e.target.value })
-                  }
-                  placeholder="Mi cuenta principal"
-                />
-              </Field>
-              <Field label="Banco">
-                <input
-                  value={editing.bank}
-                  onChange={(e) =>
-                    setEditing({ ...editing, bank: e.target.value })
-                  }
-                  placeholder="Opcional"
-                />
-              </Field>
-              <Field label="Moneda">
-                <select
-                  disabled={data.movements.some(
-                    (m) => m.accountId === editing.id,
-                  )}
-                  value={editing.currency}
-                  onChange={(e) =>
-                    setEditing({ ...editing, currency: e.target.value })
-                  }
-                >
-                  {[
-                    "EUR",
-                    "USD",
-                    "GBP",
-                    "CHF",
-                    "JPY",
-                    "CAD",
-                    "MXN",
-                    "ARS",
-                    "COP",
-                    "CLP",
-                  ].map((c) => (
-                    <option key={c}>{c}</option>
-                  ))}
-                </select>
-              </Field>
-              <Field
-                label="Saldo antes del primer movimiento"
-                hint="Opcional. Si no lo conoces, lo dejamos sin indicar."
-              >
-                <input
-                  value={opening}
-                  onChange={(e) => setOpening(e.target.value)}
-                  placeholder="0,00"
-                />
-              </Field>
-            </div>
-            <div className="modal-actions">
-              <button className="button primary">Guardar cuenta</button>
-            </div>
-          </form>
-        </Modal>
+          onClose={() => setEditing(undefined)}
+          onSaved={() => setEditing(undefined)}
+        />
       )}
     </>
   );

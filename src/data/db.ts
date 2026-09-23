@@ -10,7 +10,6 @@ import type {
   Relation,
   Location,
   Assignment,
-  ImportProfile,
   Settings,
   SearchCache,
   ModelState,
@@ -28,42 +27,27 @@ export const db = new Dexie("tanukoin") as Dexie & {
   relations: EntityTable<Relation, "id">;
   locations: EntityTable<Location, "id">;
   assignments: EntityTable<Assignment, "id">;
-  profiles: EntityTable<ImportProfile, "id">;
   settings: EntityTable<Settings, "id">;
   searchCache: EntityTable<SearchCache, "id">;
   models: EntityTable<ModelState, "id">;
   embeddings: EntityTable<Embedding, "id">;
 };
-db.version(1).stores({
+db.version(3).stores({
   accounts: "id,externalId",
   movements:
-    "id,accountId,date,categoryId,fingerprint,[accountId+externalId],importId",
+    "id,accountId,date,categoryId,*tagIds,fingerprint,[accountId+externalId],importId",
   categories: "id,parentId",
+  tags: "id,&normalizedName",
   rules: "id,priority",
   recurrences: "id,nextDate",
   relations: "id,*movementIds",
   locations: "id,start,end",
   assignments: "id,movementId,locationId",
-  profiles: "id",
   settings: "id",
   searchCache: "id",
   models: "id",
   embeddings: "id",
 });
-db.version(2)
-  .stores({
-    tags: "id,&normalizedName",
-    movements:
-      "id,accountId,date,categoryId,*tagIds,fingerprint,[accountId+externalId],importId",
-  })
-  .upgrade(async (tx) => {
-    await tx
-      .table("movements")
-      .toCollection()
-      .modify((movement) => {
-        movement.tagIds = [];
-      });
-  });
 export { defaultCategories } from "./default-categories";
 export async function initialize() {
   await db.transaction("rw", [db.categories, db.settings], async () => {
@@ -93,7 +77,6 @@ export async function readSnapshot(): Promise<Snapshot> {
       db.relations,
       db.locations,
       db.assignments,
-      db.profiles,
       db.settings,
     ],
     async () => ({
@@ -106,7 +89,6 @@ export async function readSnapshot(): Promise<Snapshot> {
       relations: await db.relations.toArray(),
       locations: await db.locations.toArray(),
       assignments: await db.assignments.toArray(),
-      profiles: await db.profiles.toArray(),
       settings: await db.settings.toArray(),
     }),
   );

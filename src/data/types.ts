@@ -93,23 +93,6 @@ export interface Assignment {
   status: "suggested" | "confirmed";
   evidence: string;
 }
-export interface ImportProfile {
-  id: string;
-  name: string;
-  headerRow: number;
-  dateFormat: "DMY" | "MDY" | "YMD";
-  decimal: "," | ".";
-  columns: {
-    date: number;
-    description: number;
-    amount: number;
-    debit: number;
-    credit: number;
-    merchant: number;
-    externalId: number;
-    balance?: number;
-  };
-}
 export interface Settings {
   hideImportWelcome?: boolean;
   hideTanuWelcome?: boolean;
@@ -171,7 +154,6 @@ export interface Snapshot {
   relations: Relation[];
   locations: Location[];
   assignments: Assignment[];
-  profiles: ImportProfile[];
   settings: Settings[];
 }
 export const emptySnapshot = (): Snapshot => ({
@@ -184,6 +166,5 @@ export const emptySnapshot = (): Snapshot => ({
   relations: [],
   locations: [],
   assignments: [],
-  profiles: [],
   settings: [],
 });

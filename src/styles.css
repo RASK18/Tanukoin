@@ -1,4 +1,48 @@
 @import url("./theme.css");
+.import-account-row,
+.import-preview-heading {
+  display: flex;
+  align-items: end;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin: 1rem 0;
+}
+.import-account-row .field {
+  flex: 1;
+  min-width: 160px;
+  margin-bottom: 0;
+}
+.import-preview-heading {
+  justify-content: space-between;
+  align-items: center;
+}
+.pdf-page-selection {
+  margin: 1rem 0;
+  border: 1px solid var(--line, #dce5db);
+  border-radius: 12px;
+  padding: 1rem;
+}
+.pdf-page-selection .field {
+  max-width: 28rem;
+  margin-top: 1rem;
+}
+.pdf-page-selection .button-row label {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+.pdf-page-selection input[type="radio"] {
+  width: auto;
+}
+.pdf-page-selection p:empty {
+  display: none;
+}
+.account-fields {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
 .gpu-models .chat-model-grid .model-card {
   background: #f3f8f2;
 }

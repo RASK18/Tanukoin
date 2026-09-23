@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { db } from "../src/data/db";
 import { categorize, cancelModel } from "../src/features/ai/client";
 import { MODEL_REVISION } from "../src/features/ai/constants";
-import { buildCandidates, defaultProfile } from "../src/features/import/parse";
+import { buildCandidates, defaultLayout } from "../src/features/import/parse";
 
 afterEach(() => {
   cancelModel("embeddings");
@@ -43,7 +43,7 @@ it("informa del progreso real por lotes y reutiliza la caché sin cambiar catego
         "-1,00",
       ]),
     ],
-    defaultProfile,
+    defaultLayout,
     { id: "a", name: "Cuenta", bank: "", currency: "EUR" },
     "ficticio.csv",
     [],

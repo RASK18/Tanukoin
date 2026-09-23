@@ -1,5 +1,4 @@
 import { projectCategoryGap } from "../src/lib/category-sort";
-import Dexie from "dexie";
 import { beforeEach, expect, it, vi } from "vitest";
 import { db, initialize, readSnapshot } from "../src/data/db";
 import type { Category, Movement, Rule } from "../src/data/types";
@@ -380,7 +379,7 @@ it("Tanu resuelve rutas, pide aclaración en nombres ambiguos y conserva filtros
 it("restaura árboles profundos y etiquetas y rechaza copias inválidas sin alterar datos", async () => {
   await db.movements.add(movement("m", "international"));
   const raw = JSON.parse(await exportBackup());
-  expect(raw.schemaVersion).toBe(2);
+  expect(raw.schemaVersion).toBe(3);
   await restoreBackup(raw);
   expect(await readSnapshot()).toEqual(raw.data);
   for (const mutate of [
@@ -406,53 +405,6 @@ it("restaura árboles profundos y etiquetas y rechaza copias inválidas sin alte
     await expect(restoreBackup(invalid)).rejects.toThrow();
     expect(await readSnapshot()).toEqual(raw.data);
   }
-});
-
-it("actualiza una base del esquema 1 conservando movimientos, categorías, preferencias y modelos", async () => {
-  await db.delete();
-  const old = new Dexie("tanukoin");
-  old.version(1).stores({
-    accounts: "id,externalId",
-    movements:
-      "id,accountId,date,categoryId,fingerprint,[accountId+externalId],importId",
-    categories: "id,parentId",
-    rules: "id,priority",
-    recurrences: "id,nextDate",
-    relations: "id,*movementIds",
-    locations: "id,start,end",
-    assignments: "id,movementId,locationId",
-    profiles: "id",
-    settings: "id",
-    searchCache: "id",
-    models: "id",
-    embeddings: "id",
-  });
-  await old.open();
-  const { tagIds, ...legacy } = movement("old");
-  await old.table("movements").put(legacy);
-  await old.table("categories").bulkPut(categories);
-  await old.table("settings").put({
-    id: "main",
-    timezone: "Europe/Madrid",
-    maps: false,
-    search: false,
-    banking: false,
-    hideImportWelcome: true,
-  });
-  await old.table("models").put({
-    id: "embeddings",
-    ready: true,
-    revision: "fixture",
-    savedAt: "2026-09-23",
-  });
-  old.close();
-  await db.open();
-  await initialize();
-  expect(await db.movements.get("old")).toEqual({ ...legacy, tagIds: [] });
-  expect(await db.categories.count()).toBe(categories.length);
-  expect((await db.settings.get("main"))?.hideImportWelcome).toBe(true);
-  expect((await db.models.get("embeddings"))?.ready).toBe(true);
-  expect(await db.tags.count()).toBe(0);
 });
 
 it("ordena, cambia de padre y promueve ramas sin alterar movimientos ni reglas", async () => {

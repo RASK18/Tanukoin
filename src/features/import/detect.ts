@@ -1,9 +1,9 @@
-import type { ImportProfile } from "../../data/types";
+import type { DetectedLayout } from "./types";
 import { normalize, parseAmount, parseDate } from "../../lib/finance";
-import { defaultProfile } from "./parse";
+import { defaultLayout, explicitCurrencies } from "./parse";
 import type { ParsedFile } from "./types";
 
-const aliases: Record<keyof ImportProfile["columns"], string[]> = {
+const aliases: Record<keyof DetectedLayout["columns"], string[]> = {
   date: [
     "fecha",
     "fecha operacion",
@@ -13,6 +13,8 @@ const aliases: Record<keyof ImportProfile["columns"], string[]> = {
     "date",
     "booking date",
     "transaction date",
+    "fecha de inicio",
+    "fecha de reserva",
   ],
   description: [
     "concepto",
@@ -37,38 +39,83 @@ const aliases: Record<keyof ImportProfile["columns"], string[]> = {
     "balance",
     "running balance",
   ],
-  debit: ["cargo", "cargos", "debe", "debit", "withdrawal"],
-  credit: ["abono", "abonos", "haber", "credit", "deposit"],
-  merchant: ["comercio", "beneficiario", "merchant", "payee"],
-  externalId: ["identificador bancario", "id", "referencia", "transaction id"],
+  debit: ["cargo", "cargos", "debe", "debit", "withdrawal", "dinero saliente"],
+  credit: ["abono", "abonos", "haber", "credit", "deposit", "dinero entrante"],
+  merchant: ["comercio", "beneficiario", "merchant", "payee", "partner name"],
+  externalId: ["identificador bancario", "id", "transaction id"],
+  currency: ["moneda", "divisa", "currency"],
+  valueDate: ["fecha valor", "fecha de valor", "value date"],
+  bookingDate: [
+    "booking date",
+    "fecha de reserva",
+    "fecha contable",
+    "fecha de contabilizacion",
+    "fecha de finalizacion",
+    "completed date",
+  ],
+  fee: ["comision", "fee"],
+  status: ["estado", "state", "status"],
+  reference: ["payment reference"],
+  type: ["tipo", "type"],
+  notes: ["notas", "notes"],
 };
 const label = (value: string) =>
   normalize(value)
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
-const complete = (p: ImportProfile) =>
+const complete = (p: DetectedLayout) =>
   p.columns.date >= 0 &&
-  p.columns.description >= 0 &&
+  (p.columns.description >= 0 ||
+    (p.bank === "n26" && (p.columns.merchant ?? -1) >= 0)) &&
   (p.columns.amount >= 0 || p.columns.debit >= 0 || p.columns.credit >= 0);
 
 export function detectImport(file: ParsedFile) {
   let sheet = 0,
     score = -1;
-  let profile: ImportProfile = {
-    ...defaultProfile,
+  let profile: DetectedLayout = {
+    ...defaultLayout,
     columns: Object.fromEntries(
       Object.keys(aliases).map((k) => [k, -1]),
-    ) as ImportProfile["columns"],
+    ) as DetectedLayout["columns"],
   };
   file.sheets.forEach((s, sheetIndex) => {
     s.rows.slice(0, 30).forEach((row, headerRow) => {
       const columns = Object.fromEntries(
         Object.entries(aliases).map(([key, names]) => [
           key,
-          row.findIndex((cell) => names.includes(label(cell))),
+          row.findIndex((cell) =>
+            names.includes(label(cell).replace(/^amount [a-z]{3}$/, "amount")),
+          ),
         ]),
-      ) as ImportProfile["columns"];
-      const candidate = { ...defaultProfile, columns, headerRow };
+      ) as DetectedLayout["columns"];
+      const labels = row.map(label);
+      const bank =
+        labels.includes("partner name") && labels.includes("payment reference")
+          ? ("n26" as const)
+          : labels.includes("fecha de inicio") &&
+              labels.includes("state") &&
+              labels.includes("comision")
+            ? ("revolut" as const)
+            : undefined;
+      if (columns.date < 0) columns.date = columns.bookingDate ?? -1;
+      if (columns.date < 0) columns.date = columns.valueDate ?? -1;
+      const headingCurrencies = explicitCurrencies(
+        s.rows
+          .slice(0, headerRow + 1)
+          .flat()
+          .join(" "),
+      );
+      const currency =
+        row[columns.amount]?.match(/\(([A-Z]{3})\)/)?.[1] ||
+        s.currency ||
+        (headingCurrencies.length === 1 ? headingCurrencies[0] : undefined);
+      const candidate: DetectedLayout = {
+        ...defaultLayout,
+        columns,
+        headerRow,
+        bank,
+        currency,
+      };
       const found =
         Object.values(columns).filter((c) => c >= 0).length +
         (complete(candidate) ? 10 : 0);
@@ -105,16 +152,16 @@ export function detectImport(file: ParsedFile) {
       if (/\.\d{1,2}$/.test(value)) dot++;
     }
   profile.decimal = dot > comma ? "." : ",";
-  return { sheet, profile, complete: complete(profile) };
+  return { sheet, layout: profile, complete: complete(profile) };
 }
 
 // The model supplies column indexes only. Never execute code or instructions from a file.
-export function validateDetectedProfile(
+export function validateDetectedLayout(
   value: unknown,
   rows: string[][],
-): ImportProfile | undefined {
+): DetectedLayout | undefined {
   if (!value || typeof value !== "object") return;
-  const p = value as ImportProfile;
+  const p = value as DetectedLayout;
   if (
     !Number.isInteger(p.headerRow) ||
     p.headerRow < 0 ||
@@ -126,13 +173,15 @@ export function validateDetectedProfile(
   )
     return;
   const width = rows[p.headerRow].length;
-  const columns = { ...defaultProfile.columns };
+  const columns = { ...defaultLayout.columns };
   for (const key of Object.keys(aliases) as (keyof typeof columns)[]) {
     const index = p.columns[key] ?? -1;
     if (!Number.isInteger(index) || index < -1 || index >= width) return;
     columns[key] = index;
   }
-  const used = Object.values(columns).filter((i) => i >= 0);
+  const used = Object.values(columns).filter(
+    (i): i is number => i !== undefined && i >= 0,
+  );
   if (new Set(used).size !== used.length) return;
   for (const [key, index] of Object.entries(columns)) {
     if (index < 0) continue;
@@ -141,8 +190,17 @@ export function validateDetectedProfile(
     );
     if (known && known[0] !== key) return;
   }
+  // An omitted currency must not let AI relabel a known foreign-currency column.
+  const currencyColumn = rows[p.headerRow].findIndex((cell) =>
+    aliases.currency.includes(label(cell)),
+  );
+  if (currencyColumn >= 0) {
+    if ((columns.currency ?? -1) >= 0 && columns.currency !== currencyColumn)
+      return;
+    columns.currency = currencyColumn;
+  }
   const result = {
-    ...defaultProfile,
+    ...defaultLayout,
     headerRow: p.headerRow,
     dateFormat: p.dateFormat,
     decimal: p.decimal,

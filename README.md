@@ -8,7 +8,7 @@ Finanzas personales en español, en tu navegador. PWA estática sin backend, ana
 
 ## Funciones
 
-- CSV, XLS/XLSX y PDF con texto: columnas configurables, perfiles, corrección y revisión de duplicados antes de guardar.
+- Importación automática de CSV, XLS/XLSX y PDF con texto sin descargar modelos, con selección de páginas por rangos, creación de cuentas y revisión de duplicados antes de guardar.
 - Cuentas, categorías jerárquicas sin límite fijo de niveles, etiquetas independientes, notas, edición en lote y relaciones de transferencia/devolución.
 - Reglas por prioridad que respetan categorías manuales, con revisión para aplicarlas al historial.
 - Resumen, gráficos y calendario semanal, mensual y anual. Monedas separadas, sin conversión automática.
@@ -16,6 +16,20 @@ Finanzas personales en español, en tu navegador. PWA estática sin backend, ana
 - Embeddings locales para categorizar y buscar por similitud. Tanu ofrece ayuda sobre la web, conversación básica, búsquedas y estadísticas mediante un modelo local preparado (WebGPU). La aplicación valida las consultas y calcula las cifras; el chat no modifica movimientos.
 - Enable Banking mediante una extensión opcional Manifest V3 para Chrome/Edge de escritorio.
 - Copias completas JSON y exportación de movimientos CSV.
+
+## Importación de archivos
+
+Los formatos reconocidos se leen completamente en el navegador sin modelos de IA. Se contemplan los extractos de OpenBank (incluido HTML con extensión XLS), MyInvestor, Pibank, Revolut y N26, además de tablas genéricas y certificados PDF reconocidos. Esto no garantiza todos los diseños o futuras exportaciones de cada banco. No hay OCR.
+
+Elige el archivo y la cuenta de destino, o pulsa **Crear cuenta** para crearla sin salir del importador. La vista previa muestra los movimientos interpretados. No hay perfiles ni configuración manual de columnas: los formatos desconocidos ofrecen **Intentar con IA local** únicamente si ya hay un modelo preparado, sin descargas automáticas. Las propuestas se validan antes de utilizarlas.
+
+En PDF, **Todas las páginas** importa las páginas con movimientos y explica las informativas. **Elegir páginas** acepta `1-29` o `1-8, 12, 20-29`. Los rangos inválidos bloquean continuar; navegar por la vista previa no cambia la selección. En Excel con varias hojas puedes elegir la hoja.
+
+Se usa la fecha de operación cuando existe y se conservan las fechas secundarias en los campos o notas correspondientes. Las horas sin zona permanecen en notas, sin inventar un instante. Los registros de importe cero son válidos; un concepto vacío se guarda como «Sin concepto». Revolut incluye la comisión en el importe neto y explica su desglose. Una moneda incompatible bloquea la importación. Las incidencias no se descartan silenciosamente y el guardado siempre requiere revisión y confirmación.
+
+Durante el desarrollo temprano se trabaja con una instalación limpia. Las copias actuales usan el formato 3; no se convierten copias anteriores ni se conservan perfiles de importación. La aplicación no borra automáticamente datos para actualizarse.
+
+Para comprobar archivos propios localmente después de compilar, puede usarse `node scripts/check-import-files.mjs <archivo> [...archivos]`. El comprobador crea contextos aislados, bloquea conexiones externas y no guarda capturas, trazas, documentos ni datos extraídos. Admite recuentos esperados mediante `TANUKOIN_IMPORT_EXPECTED_COUNTS`, separados por comas, y `TEST_BROWSER_CHANNEL` para elegir el navegador. No incorpores los archivos ni sus rutas personales al repositorio.
 
 ## Desarrollo
 
@@ -39,9 +53,9 @@ Mover una categoría conserva sus descendientes y asignaciones. Eliminarla requi
 
 Puedes preguntar a Tanu «Gastos con la etiqueta Vacaciones Japón» o «Gastos de la categoría Viajes». Ante categorías con nombres iguales, la aplicación pide concretar su ruta. Las etiquetas no se heredan entre movimientos relacionados ni se asignan mediante reglas o IA. Los cargos previstos del resumen mantienen su alcance por mes y moneda porque las recurrencias no tienen categorías ni etiquetas propias.
 
-Las copias completas utilizan el formato 2 e incluyen árbol, etiquetas y asignaciones. Se rechazan las copias anteriores del formato 1 sin alterar los datos; desde una instalación actualizada puedes exportar una copia nueva. El CSV exporta la ruta de categoría y los nombres de etiquetas, pero la restauración completa se realiza mediante JSON.
+Las copias completas utilizan el formato 3 e incluyen árbol, etiquetas y asignaciones. Se rechazan versiones anteriores sin conversión ni alteración de los datos actuales. El CSV exporta la ruta de categoría y los nombres de etiquetas, pero la restauración completa se realiza mediante JSON.
 
-Para probar el catálogo inicial nuevo, ejecuta `pnpm dev` y abre `http://127.0.0.1:5173/Tanukoin/` en un perfil de navegador de pruebas nuevo. Crea una cuenta e importa un CSV ficticio. Tu perfil habitual conserva sus categorías y modelos al actualizar; no necesitas borrar su almacenamiento. El catálogo se inserta únicamente en la primera inicialización, no reaparece al eliminar categorías.
+Para probar el catálogo inicial, ejecuta `pnpm dev` y abre `http://127.0.0.1:5173/Tanukoin/` en un perfil de navegador de pruebas nuevo. Crea una cuenta e importa un CSV ficticio. Durante esta etapa no se exige compatibilidad con datos de versiones anteriores; cualquier limpieza previa la realiza el desarrollador, nunca la aplicación. El catálogo se inserta únicamente en la primera inicialización, no reaparece al eliminar categorías.
 
 ### Entorno
 

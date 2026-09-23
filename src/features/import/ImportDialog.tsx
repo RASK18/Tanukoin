@@ -1,8 +1,10 @@
 import { validAutomaticCategory } from "../../data/classification";
 import { getActiveChatModel } from "../ai/model-store";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Upload,
+  Plus,
+  Sparkles,
   FileSpreadsheet,
   ArrowRight,
   Check,
@@ -10,7 +12,7 @@ import {
   X,
 } from "lucide-react";
 import { db } from "../../data/db";
-import type { ImportProfile, Movement } from "../../data/types";
+import type { Movement } from "../../data/types";
 import {
   applyRules,
   money,
@@ -19,13 +21,16 @@ import {
   parseDate,
 } from "../../lib/finance";
 import { useApp, Modal, Field, AccountSelect } from "../../components/ui";
-import { buildCandidates, defaultProfile, duplicateChecker } from "./parse";
+import { buildCandidates, duplicateChecker } from "./parse";
+import { prepareImport } from "./prepare";
+import { parsePageRanges } from "./page-ranges";
+import { AccountDialog } from "../../components/AccountDialog";
 import {
   detectImport,
   detectionPrompt,
-  validateDetectedProfile,
+  validateDetectedLayout,
 } from "./detect";
-import type { Candidate, ParsedFile } from "./types";
+import type { Candidate, ParsedFile, DetectedLayout } from "./types";
 
 export function ImportDialog({
   onClose,
@@ -37,11 +42,27 @@ export function ImportDialog({
   const { data, run, notify } = useApp();
   const [parsed, setParsed] = useState<ParsedFile>();
   const [file, setFile] = useState<File>();
-  const [delimiter, setDelimiter] = useState("");
-  const [sheet, setSheet] = useState(0),
-    [pages, setPages] = useState<number[]>([]);
+  const [sheet, setSheet] = useState(0);
+  const [pageMode, setPageMode] = useState<"all" | "ranges">("all");
+  const [pageRanges, setPageRanges] = useState("");
+  const [previewSheet, setPreviewSheet] = useState(0);
   const [account, setAccount] = useState(data.accounts[0]?.id || "");
-  const [profile, setProfile] = useState<ImportProfile>({ ...defaultProfile });
+  const [creatingAccount, setCreatingAccount] = useState(false);
+  const [overrides, setOverrides] = useState<Record<number, DetectedLayout>>(
+    {},
+  );
+  const [aiAvailable, setAiAvailable] = useState(false);
+  useEffect(() => {
+    let active = true;
+    void getActiveChatModel()
+      .then((model) => {
+        if (active) setAiAvailable(!!model);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
   const [candidates, setCandidates] = useState<Candidate[]>(() => {
     const check = duplicateChecker(data.movements);
     return (
@@ -80,9 +101,8 @@ export function ImportDialog({
     },
     [],
   );
-  function read(selected: File, separator = delimiter) {
+  function read(selected: File) {
     const current = ++generation.current;
-    setDelimiter(separator);
     setDetection("");
     setEditErrors({});
     setFile(selected);
@@ -91,12 +111,16 @@ export function ImportDialog({
     setErrors([]);
     setReview(false);
     setParsed(undefined);
+    setOverrides({});
+    setPageMode("all");
+    setPageRanges("");
+    setPreviewSheet(0);
     worker.current?.terminate();
     worker.current = new Worker(
       new URL("./import.worker.ts", import.meta.url),
       { type: "module" },
     );
-    worker.current.onmessage = async (e) => {
+    worker.current.onmessage = (e) => {
       if (current !== generation.current) return;
       if (e.data.progress) setProgress(e.data.progress);
       if (e.data.error) {
@@ -106,89 +130,133 @@ export function ImportDialog({
       if (e.data.result) {
         const result: ParsedFile = e.data.result;
         const detected = detectImport(result);
-        let note = detected.complete
-          ? "Columnas y formatos detectados automáticamente en tu dispositivo."
-          : "No se han reconocido todas las columnas. Revisa las opciones avanzadas.";
-        try {
-          if (!detected.complete && (await getActiveChatModel())) {
-            const { completion } = await import("../ai/client");
-            const sample = result.sheets[detected.sheet].rows
-              .slice(0, 15)
-              .map((row) => row.slice(0, 20).map((cell) => cell.slice(0, 120)));
-            const answer = await completion(
-              detectionPrompt,
-              JSON.stringify(sample),
-              true,
-            );
-            const suggested = validateDetectedProfile(
-              JSON.parse(answer),
-              result.sheets[detected.sheet].rows,
-            );
-            if (suggested) {
-              detected.profile = suggested;
-              note =
-                "Columnas detectadas por la IA local y comprobadas con las filas del archivo.";
-            } else
-              note =
-                "La propuesta de la IA no es válida. Revisa las opciones avanzadas.";
-          }
-        } catch {
-          note =
-            "La IA local no está disponible. Revisa la detección en opciones avanzadas.";
-        }
-        if (current !== generation.current) return;
         setParsed(result);
         setSheet(detected.sheet);
-        setPages(
-          result.normalizedPdf
-            ? result.sheets.map((_, index) => index)
-            : [detected.sheet],
-        );
-        setProfile(detected.profile);
-        setDetection(note);
         setLoading(false);
       }
     };
     worker.current.onerror = () => {
+      if (current !== generation.current) return;
       setErrors([
         "No se pudo iniciar el lector local. Comprueba los recursos offline o vuelve a cargar.",
       ]);
       setLoading(false);
     };
-    worker.current.postMessage({ file: selected, delimiter: separator });
+    worker.current.postMessage({ file: selected });
   }
-  const rows = parsed?.sheets[sheet]?.rows || [];
-  const headers = rows[profile.headerRow] || [];
-  const maxColumns = Math.max(
-    headers.length,
-    ...rows.slice(0, 20).map((r) => r.length),
-    1,
+  const pageSelection = useMemo(() => {
+    if (!parsed) return { indices: [] as number[], error: "" };
+    if (parsed.kind !== "pdf") return { indices: [sheet], error: "" };
+    try {
+      const pages =
+        pageMode === "all"
+          ? parsed.sheets.map((_, i) => i + 1)
+          : parsePageRanges(pageRanges, parsed.sheets.length);
+      return { indices: pages.map((p) => p - 1), error: "" };
+    } catch (error) {
+      return {
+        indices: [],
+        error: error instanceof Error ? error.message : "Selección no válida",
+      };
+    }
+  }, [parsed, sheet, pageMode, pageRanges]);
+  const target = data.accounts.find((a) => a.id === account);
+  const previewAccount = useMemo(
+    () => target || { id: "preview", name: "", bank: "", currency: "EUR" },
+    [target],
   );
+  const prepared = useMemo(
+    () =>
+      parsed
+        ? prepareImport(
+            parsed,
+            previewAccount,
+            pageSelection.indices,
+            overrides,
+            data.movements,
+          )
+        : undefined,
+    [parsed, previewAccount, pageSelection, overrides, data.movements],
+  );
+  const shown = useMemo(
+    () =>
+      parsed?.kind === "pdf"
+        ? prepareImport(
+            parsed,
+            previewAccount,
+            [previewSheet],
+            overrides,
+            data.movements,
+          )
+        : prepared,
+    [parsed, previewAccount, previewSheet, overrides, data.movements, prepared],
+  );
+  const issues = review ? errors : [...errors, ...(prepared?.errors || [])];
   function preview() {
-    const target = data.accounts.find((a) => a.id === account);
-    if (!target) {
-      notify("Crea o selecciona una cuenta antes de importar.");
+    if (
+      !target ||
+      !prepared ||
+      pageSelection.error ||
+      prepared.errors.length ||
+      !prepared.candidates.length
+    )
       return;
-    }
-    const selected = parsed?.sheets[sheet]?.page ? pages : [sheet];
-    const all: Candidate[] = [];
-    const failures: string[] = [];
-    for (const index of selected) {
-      const s = parsed!.sheets[index];
-      const result = buildCandidates(
-        s.rows,
-        profile,
-        target,
-        parsed!.name,
-        data.movements,
-      );
-      all.push(...result.candidates);
-      failures.push(...result.errors.map((e) => `${s.name}: ${e}`));
-    }
-    setCandidates(all);
-    setErrors(failures);
+    setCandidates(prepared.candidates);
+    setErrors([]);
     setReview(true);
     setPreviewPage(0);
+    setSaveFailed(false);
+  }
+  async function assist() {
+    if (!parsed || !prepared || !aiAvailable) return;
+    const current = ++generation.current;
+    setLoading(true);
+    setProgress(0);
+    setDetection("La IA local está intentando reconocer las columnas.");
+    const next = { ...overrides };
+    let recognized = 0;
+    try {
+      const { completion } = await import("../ai/client");
+      for (const index of prepared.unknown) {
+        const rows = parsed.sheets[index].rows;
+        const sample = rows
+          .slice(0, 30)
+          .map((row) => row.slice(0, 20).map((cell) => cell.slice(0, 120)));
+        const answer = await completion(
+          detectionPrompt,
+          JSON.stringify(sample),
+          true,
+        );
+        if (current !== generation.current) return;
+        const layout = validateDetectedLayout(JSON.parse(answer), rows);
+        if (layout) {
+          const check = buildCandidates(
+            rows,
+            layout,
+            previewAccount,
+            parsed.name,
+            [],
+          );
+          if (check.candidates.length && !check.errors.length) {
+            next[index] = layout;
+            recognized++;
+          }
+        }
+      }
+      setOverrides(next);
+      setDetection(
+        recognized
+          ? "La propuesta de la IA se ha comprobado con las filas del archivo. Revisa los movimientos."
+          : "La IA no ha podido reconocer el formato de forma fiable. Elige otro archivo.",
+      );
+    } catch {
+      if (current === generation.current)
+        setDetection(
+          "La IA local no ha podido reconocer el archivo. Puedes elegir otro formato.",
+        );
+    } finally {
+      if (current === generation.current) setLoading(false);
+    }
   }
   async function save() {
     if (savingRef.current) return;
@@ -239,35 +307,52 @@ export function ImportDialog({
           }
         }
         setSaving({ phase: "Comprobando identificadores bancarios" });
-        await db.transaction("rw", [db.movements, db.categories], async () => {
-          const categories = new Set(
-            (await db.categories.toArray()).map((c) => c.id),
-          );
-          prepared = prepared.map((m) => validAutomaticCategory(m, categories));
-          const savedExternal = new Set(
-            (await db.movements.toArray())
-              .filter((m) => m.externalId)
-              .map((m) => JSON.stringify([m.accountId, m.externalId])),
-          );
-          const pending = prepared.filter(
-            (m) =>
-              !m.externalId ||
-              !savedExternal.has(JSON.stringify([m.accountId, m.externalId])),
-          );
-          setSaving({
-            phase: "Guardando movimientos",
-            done: 0,
-            total: pending.length,
-          });
-          for (let i = 0; i < pending.length; i += 250) {
-            await db.movements.bulkAdd(pending.slice(i, i + 250));
+        await db.transaction(
+          "rw",
+          [db.movements, db.categories, db.accounts],
+          async () => {
+            const accounts = new Map(
+              (await db.accounts.toArray()).map((a) => [a.id, a]),
+            );
+            if (
+              prepared.some(
+                (m) => accounts.get(m.accountId)?.currency !== m.currency,
+              )
+            )
+              throw new Error(
+                "La cuenta de destino ya no existe o ha cambiado de moneda. Vuelve a seleccionar una cuenta.",
+              );
+            const categories = new Set(
+              (await db.categories.toArray()).map((c) => c.id),
+            );
+            prepared = prepared.map((m) =>
+              validAutomaticCategory(m, categories),
+            );
+            const savedExternal = new Set(
+              (await db.movements.toArray())
+                .filter((m) => m.externalId)
+                .map((m) => JSON.stringify([m.accountId, m.externalId])),
+            );
+            const pending = prepared.filter(
+              (m) =>
+                !m.externalId ||
+                !savedExternal.has(JSON.stringify([m.accountId, m.externalId])),
+            );
             setSaving({
               phase: "Guardando movimientos",
-              done: Math.min(i + 250, pending.length),
+              done: 0,
               total: pending.length,
             });
-          }
-        });
+            for (let i = 0; i < pending.length; i += 250) {
+              await db.movements.bulkAdd(pending.slice(i, i + 250));
+              setSaving({
+                phase: "Guardando movimientos",
+                done: Math.min(i + 250, pending.length),
+                total: pending.length,
+              });
+            }
+          },
+        );
       })(),
       "Movimientos importados. Todo se ha guardado en este navegador.",
     );
@@ -354,7 +439,7 @@ export function ImportDialog({
                 notify("Suelta un solo archivo cada vez.");
                 return;
               }
-              read(e.dataTransfer.files[0], "");
+              read(e.dataTransfer.files[0]);
             }}
           >
             <Upload size={28} />
@@ -370,48 +455,99 @@ export function ImportDialog({
               type="file"
               accept=".csv,.tsv,.xls,.xlsx,.pdf"
               onChange={(e) => {
-                if (e.target.files?.[0]) read(e.target.files[0], "");
+                if (e.target.files?.[0]) read(e.target.files[0]);
               }}
             />
             <span className="file-choice" aria-hidden="true">
               {file ? "Cambiar archivo" : "Elegir archivo"}
             </span>
           </label>
+          <div className="import-account-row">
+            <Field label="Cuenta de destino">
+              <AccountSelect
+                value={account}
+                onChange={setAccount}
+                data={data}
+              />
+            </Field>
+            <button
+              type="button"
+              className="button secondary"
+              onClick={() => setCreatingAccount(true)}
+            >
+              <Plus size={16} /> Crear cuenta
+            </button>
+          </div>
           {!data.accounts.length && (
-            <div className="notice warning">
-              Primero crea una cuenta en la sección Cuentas.
-            </div>
+            <p className="muted">
+              Crea una cuenta aquí para guardar los movimientos. El archivo
+              elegido se conservará.
+            </p>
           )}
           {parsed && (
             <>
-              <div className="form-grid">
-                <Field label="Cuenta de destino">
-                  <AccountSelect
-                    value={account}
-                    onChange={setAccount}
-                    data={data}
-                  />
-                </Field>
-              </div>
-              <p className="muted" role="status">
-                {detection}
-              </p>
-              <details className="import-advanced">
-                <summary>Opciones avanzadas</summary>
-                <div className="form-grid">
-                  <Field label="Hoja / página">
+              {parsed.kind === "pdf" ? (
+                <fieldset className="pdf-page-selection">
+                  <legend>Páginas que se importarán</legend>
+                  <div className="button-row">
+                    <label>
+                      <input
+                        type="radio"
+                        name="pdf-pages"
+                        checked={pageMode === "all"}
+                        onChange={() => setPageMode("all")}
+                      />{" "}
+                      Todas las páginas
+                    </label>
+                    <label>
+                      <input
+                        type="radio"
+                        name="pdf-pages"
+                        checked={pageMode === "ranges"}
+                        onChange={() => setPageMode("ranges")}
+                      />{" "}
+                      Elegir páginas
+                    </label>
+                  </div>
+                  {pageMode === "ranges" && (
+                    <Field label="Páginas">
+                      <input
+                        value={pageRanges}
+                        onChange={(e) => setPageRanges(e.target.value)}
+                        placeholder="1-8, 12, 20-29"
+                        aria-invalid={!!pageSelection.error}
+                        aria-describedby="pdf-range-help pdf-range-error"
+                      />
+                    </Field>
+                  )}
+                  {pageMode === "ranges" && (
+                    <p id="pdf-range-help" className="muted">
+                      Por ejemplo: 1-29 para importar hasta la página 29, o 1-8,
+                      12, 20-29 para combinar rangos.
+                    </p>
+                  )}
+                  <p
+                    id="pdf-range-error"
+                    role={pageSelection.error ? "alert" : undefined}
+                  >
+                    {pageSelection.error}
+                  </p>
+                  {!pageSelection.error && (
+                    <p role="status">
+                      {pageSelection.indices.length} de {parsed.sheets.length}{" "}
+                      páginas seleccionadas · {prepared?.candidates.length || 0}{" "}
+                      movimientos
+                      {!!prepared?.informational &&
+                        ` · ${prepared.informational} páginas informativas sin movimientos`}
+                    </p>
+                  )}
+                </fieldset>
+              ) : (
+                parsed.sheets.length > 1 && (
+                  <Field label="Hoja">
                     <select
                       value={sheet}
-                      onChange={(e) => {
-                        const index = Number(e.target.value);
-                        setSheet(index);
-                        setProfile(
-                          detectImport({
-                            ...parsed,
-                            sheets: [parsed.sheets[index]],
-                          }).profile,
-                        );
-                      }}
+                      onChange={(e) => setSheet(Number(e.target.value))}
                     >
                       {parsed.sheets.map((s, i) => (
                         <option key={i} value={i}>
@@ -420,217 +556,120 @@ export function ImportDialog({
                       ))}
                     </select>
                   </Field>
-                  <Field label="Perfil guardado">
-                    <select
-                      value={profile.id}
-                      onChange={(e) =>
-                        setProfile(
-                          data.profiles.find(
-                            (p) => p.id === e.target.value,
-                          ) || {
-                            ...defaultProfile,
-                          },
-                        )
-                      }
+                )
+              )}
+              {!!prepared?.unknown.length && (
+                <div className="notice warning">
+                  <p>
+                    No se ha reconocido el formato de {prepared.unknown.length}{" "}
+                    hojas o páginas.
+                  </p>
+                  {aiAvailable ? (
+                    <button
+                      className="button secondary"
+                      disabled={loading}
+                      onClick={assist}
                     >
-                      <option value="">Personalizado</option>
-                      {data.profiles.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name}
+                      <Sparkles size={16} /> Intentar con IA local
+                    </button>
+                  ) : (
+                    <p>
+                      No hay un modelo local preparado. Puedes elegir otro
+                      archivo; los formatos reconocidos no necesitan IA.
+                    </p>
+                  )}
+                </div>
+              )}
+              {detection && (
+                <p className="muted" role="status">
+                  {detection}
+                </p>
+              )}
+              {!prepared?.errors.length &&
+                !pageSelection.error &&
+                !!prepared?.candidates.length && (
+                  <p className="muted">
+                    Archivo reconocido en tu dispositivo. No necesitas descargar
+                    modelos para importarlo.
+                  </p>
+                )}
+              <div className="import-preview-heading">
+                <h3>Vista previa</h3>
+                {parsed.kind === "pdf" && (
+                  <Field label="Vista previa de página">
+                    <select
+                      value={previewSheet}
+                      onChange={(e) => setPreviewSheet(Number(e.target.value))}
+                    >
+                      {parsed.sheets.map((s, i) => (
+                        <option value={i} key={i}>
+                          {s.name}
                         </option>
                       ))}
                     </select>
                   </Field>
-                  <Field label="Fila de cabecera">
-                    <input
-                      type="number"
-                      min="1"
-                      max={Math.max(rows.length, 1)}
-                      value={profile.headerRow + 1}
-                      onChange={(e) =>
-                        setProfile({
-                          ...profile,
-                          headerRow: Math.max(0, Number(e.target.value) - 1),
-                        })
-                      }
-                    />
-                  </Field>
-                  <Field label="Formato de fecha">
-                    <select
-                      value={profile.dateFormat}
-                      onChange={(e) =>
-                        setProfile({
-                          ...profile,
-                          dateFormat: e.target
-                            .value as ImportProfile["dateFormat"],
-                        })
-                      }
-                    >
-                      <option value="DMY">Día / mes / año</option>
-                      <option value="MDY">Mes / día / año</option>
-                      <option value="YMD">Año / mes / día</option>
-                    </select>
-                  </Field>
-                  <Field label="Separador decimal">
-                    <select
-                      value={profile.decimal}
-                      onChange={(e) =>
-                        setProfile({
-                          ...profile,
-                          decimal: e.target.value as "," | ".",
-                        })
-                      }
-                    >
-                      <option value=",">Coma · 1.234,56</option>
-                      <option value=".">Punto · 1,234.56</option>
-                    </select>
-                  </Field>
-                  {file?.name.toLowerCase().match(/\.(csv|tsv)$/) && (
-                    <Field label="Separador CSV">
-                      <select
-                        value={delimiter}
-                        onChange={(e) => {
-                          setDelimiter(e.target.value);
-                          read(file, e.target.value);
-                        }}
-                      >
-                        <option value="">Detectar</option>
-                        <option value=";">Punto y coma</option>
-                        <option value=",">Coma</option>
-                        <option value={"\t"}>Tabulador</option>
-                      </select>
-                    </Field>
-                  )}
-                </div>
-                {parsed.sheets[sheet]?.page && (
-                  <fieldset>
-                    <legend>Páginas que se importarán</legend>
-                    <div className="chips">
-                      {parsed.sheets.map((s, i) => (
-                        <label key={i}>
-                          <input
-                            type="checkbox"
-                            checked={pages.includes(i)}
-                            onChange={(e) =>
-                              setPages(
-                                e.target.checked
-                                  ? [...pages, i]
-                                  : pages.filter((p) => p !== i),
-                              )
-                            }
-                          />
-                          {s.name}
-                        </label>
-                      ))}
-                    </div>
-                  </fieldset>
                 )}
-                <h3>Relaciona las columnas</h3>
-                <div className="form-grid columns-grid">
-                  {Object.entries({
-                    date: "Fecha",
-                    description: "Concepto",
-                    amount: "Importe con signo",
-                    debit: "Cargo (alternativa)",
-                    credit: "Abono (alternativa)",
-                    merchant: "Comercio",
-                    externalId: "Identificador bancario",
-                    balance: "Saldo",
-                  }).map(([key, label]) => (
-                    <Field key={key} label={label}>
-                      <select
-                        value={
-                          profile.columns[
-                            key as keyof typeof profile.columns
-                          ] ?? -1
-                        }
-                        onChange={(e) =>
-                          setProfile({
-                            ...profile,
-                            columns: {
-                              ...profile.columns,
-                              [key]: Number(e.target.value),
-                            },
-                          })
-                        }
-                      >
-                        <option value={-1}>No usar</option>
-                        {Array.from({ length: maxColumns }, (_, i) => (
-                          <option key={i} value={i}>
-                            {i + 1}. {headers[i] || `Columna ${i + 1}`}
-                          </option>
-                        ))}
-                      </select>
-                    </Field>
-                  ))}
-                </div>
-                <div className="inline-form">
-                  <input
-                    aria-label="Nombre del perfil"
-                    placeholder="Nombre para guardar este perfil"
-                    value={profile.name}
-                    onChange={(e) =>
-                      setProfile({ ...profile, name: e.target.value })
-                    }
-                  />
-                  <button
-                    className="button secondary"
-                    disabled={!profile.name.trim()}
-                    onClick={() =>
-                      run(
-                        db.profiles.put({
-                          ...profile,
-                          id: profile.id || crypto.randomUUID(),
-                        }),
-                        "Perfil guardado",
-                      )
-                    }
-                  >
-                    Guardar perfil
-                  </button>
-                </div>
-              </details>
-              <h3>Vista previa</h3>
-              <div className="table-scroll preview-table">
-                <table>
-                  <thead>
-                    <tr>
-                      {Array.from({ length: maxColumns }, (_, i) => (
-                        <th key={i}>
-                          {i + 1}. {headers[i]}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows
-                      .slice(profile.headerRow + 1, profile.headerRow + 7)
-                      .map((row, i) => (
-                        <tr key={i}>
-                          {row.map((cell, j) => (
-                            <td key={j}>{cell}</td>
-                          ))}
+              </div>
+              {shown?.informational ? (
+                <p className="muted">
+                  Página informativa, sin movimientos que importar.
+                </p>
+              ) : (
+                <div className="table-scroll preview-table">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Fecha</th>
+                        <th>Concepto</th>
+                        <th>Importe</th>
+                        <th>Saldo</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {shown?.candidates.slice(0, 6).map((c) => (
+                        <tr key={c.movement.id}>
+                          <td>{c.movement.date}</td>
+                          <td>{c.movement.description}</td>
+                          <td>
+                            {money(c.movement.amount, c.movement.currency)}
+                          </td>
+                          <td>
+                            {c.movement.balance === undefined
+                              ? "—"
+                              : money(c.movement.balance, c.movement.currency)}
+                          </td>
                         </tr>
                       ))}
-                  </tbody>
-                </table>
-              </div>
-              {parsed.warnings.map((warning, i) => (
-                <p className="muted" key={i}>
-                  {warning}
-                </p>
-              ))}
+                    </tbody>
+                  </table>
+                  {!shown?.candidates.length && (
+                    <p className="muted">
+                      No hay movimientos reconocidos en esta vista.
+                    </p>
+                  )}
+                </div>
+              )}
+              {!!prepared?.warnings.length && (
+                <details className="notice warning">
+                  <summary>
+                    {prepared.warnings.length} avisos del archivo
+                  </summary>
+                  <ul>
+                    {prepared.warnings.map((w, i) => (
+                      <li key={i}>{w}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
               <div className="modal-actions">
                 <button
                   className="button primary"
                   disabled={
-                    !account ||
+                    !target ||
                     loading ||
-                    profile.columns.date < 0 ||
-                    profile.columns.description < 0 ||
-                    (profile.columns.amount < 0 &&
-                      profile.columns.debit < 0 &&
-                      profile.columns.credit < 0)
+                    !!pageSelection.error ||
+                    !!prepared?.errors.length ||
+                    !prepared?.candidates.length
                   }
                   onClick={preview}
                 >
@@ -690,19 +729,19 @@ export function ImportDialog({
           )}
         </div>
       )}
-      {errors.length > 0 && !saving && (
+      {issues.length > 0 && !saving && (
         <details className="notice warning" open>
           <summary>
-            <AlertTriangle size={16} /> {errors.length} filas o incidencias que
+            <AlertTriangle size={16} /> {issues.length} filas o incidencias que
             requieren revisión
           </summary>
           <ul>
-            {errors.slice(0, 30).map((e, i) => (
+            {issues.slice(0, 30).map((e, i) => (
               <li key={i}>{e}</li>
             ))}
           </ul>
-          {errors.length > 30 && (
-            <p>Y {errors.length - 30} más. Revisa el archivo de origen.</p>
+          {issues.length > 30 && (
+            <p>Y {issues.length - 30} más. Revisa el archivo de origen.</p>
           )}
         </details>
       )}
@@ -757,7 +796,7 @@ export function ImportDialog({
                       <tr key={c.movement.id}>
                         <td>
                           <input
-                            aria-label={`Incluir fila ${c.row}`}
+                            aria-label={`Incluir fila ${c.row}${c.page ? ` de la página ${c.page}` : ""}`}
                             type="checkbox"
                             disabled={c.duplicate === "exact"}
                             checked={c.selected}
@@ -771,6 +810,7 @@ export function ImportDialog({
                               )
                             }
                           />
+                          {c.page && <small>Pág. {c.page}</small>}
                         </td>
                         <td>
                           <input
@@ -874,6 +914,15 @@ export function ImportDialog({
             </button>
           </div>
         </>
+      )}
+      {creatingAccount && (
+        <AccountDialog
+          onClose={() => setCreatingAccount(false)}
+          onSaved={(created) => {
+            setAccount(created.id);
+            setCreatingAccount(false);
+          }}
+        />
       )}
       <p className="privacy-foot">
         <X size={13} /> Ningún archivo se envía a un servidor.

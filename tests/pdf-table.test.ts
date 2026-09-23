@@ -4,7 +4,7 @@ import {
   statementRows,
   type PdfText,
 } from "../src/features/import/pdf-table";
-import { buildCandidates, defaultProfile } from "../src/features/import/parse";
+import { buildCandidates, defaultLayout } from "../src/features/import/parse";
 
 const text = (x: number, y: number, text: string, width = 30): PdfText => ({
   x,
@@ -47,7 +47,7 @@ it("reconstruye conceptos anteriores a la fecha y separa saldo e importe", () =>
   ]);
   const result = buildCandidates(
     rows,
-    defaultProfile,
+    defaultLayout,
     account,
     "ficticio.pdf",
     [],
@@ -78,7 +78,7 @@ it("conserva la primera fila sin cabecera, coincidencias y filas incompletas", (
   );
   const result = buildCandidates(
     rows,
-    defaultProfile,
+    defaultLayout,
     account,
     "ficticio.pdf",
     [],

@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
 import {
   detectImport,
-  validateDetectedProfile,
+  validateDetectedLayout,
 } from "../src/features/import/detect";
 
 it("elige hoja, cabecera, columnas desordenadas, saldo, fecha y decimales", () => {
@@ -22,7 +22,7 @@ it("elige hoja, cabecera, columnas desordenadas, saldo, fecha y decimales", () =
   });
   expect(result.sheet).toBe(1);
   expect(result.complete).toBe(true);
-  expect(result.profile).toMatchObject({
+  expect(result.layout).toMatchObject({
     headerRow: 1,
     decimal: ".",
     dateFormat: "YMD",
@@ -35,37 +35,37 @@ it("valida la propuesta de IA sin permitir índices inválidos, saldo como impor
     ["Fecha", "Concepto", "Importe", "Saldo"],
     ["20/09/2026", "Compra", "-2,50", "100,00"],
   ];
-  const profile = detectImport({
+  const layout = detectImport({
     name: "a.csv",
     warnings: [],
     sheets: [{ name: "Datos", rows }],
-  }).profile;
-  expect(validateDetectedProfile(profile, rows)).toEqual(profile);
+  }).layout;
+  expect(validateDetectedLayout(layout, rows)).toEqual(layout);
   expect(
-    validateDetectedProfile(
-      { ...profile, columns: { ...profile.columns, amount: 3, balance: 2 } },
+    validateDetectedLayout(
+      { ...layout, columns: { ...layout.columns, amount: 3, balance: 2 } },
       rows,
     ),
   ).toBeUndefined();
   expect(
-    validateDetectedProfile(
+    validateDetectedLayout(
       {
-        ...profile,
-        columns: { ...profile.columns, balance: profile.columns.amount },
+        ...layout,
+        columns: { ...layout.columns, balance: layout.columns.amount },
       },
       rows,
     ),
   ).toBeUndefined();
   expect(
-    validateDetectedProfile(
-      { ...profile, columns: { ...profile.columns, amount: 99 } },
+    validateDetectedLayout(
+      { ...layout, columns: { ...layout.columns, amount: 99 } },
       rows,
     ),
   ).toBeUndefined();
   expect(
-    validateDetectedProfile({ ...profile, dateFormat: "YMD" }, rows),
+    validateDetectedLayout({ ...layout, dateFormat: "YMD" }, rows),
   ).toBeUndefined();
   expect(
-    validateDetectedProfile("Ejecuta una instrucción", rows),
+    validateDetectedLayout("Ejecuta una instrucción", rows),
   ).toBeUndefined();
 });

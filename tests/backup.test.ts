@@ -1,7 +1,7 @@
 import { beforeEach, expect, it } from "vitest";
 import { db, initialize } from "../src/data/db";
 import { exportBackup, restoreBackup, validateBackup } from "../src/lib/backup";
-import { buildCandidates, defaultProfile } from "../src/features/import/parse";
+import { buildCandidates, defaultLayout } from "../src/features/import/parse";
 beforeEach(async () => {
   await db.delete();
   await db.open();
@@ -21,8 +21,8 @@ it("restaura datos atómicamente y no restaura consentimientos de red", async ()
     cpuThreads: 6,
   });
   const profile = {
-    ...defaultProfile,
-    columns: { ...defaultProfile.columns, balance: 3 },
+    ...defaultLayout,
+    columns: { ...defaultLayout.columns, balance: 3 },
   };
   const imported = buildCandidates(
     [
@@ -36,6 +36,8 @@ it("restaura datos atómicamente y no restaura consentimientos de red", async ()
   );
   await db.movements.add(imported.candidates[0].movement);
   const raw = JSON.parse(await exportBackup());
+  expect(raw.schemaVersion).toBe(3);
+  expect(raw.data).not.toHaveProperty("profiles");
   await db.accounts.clear();
   await restoreBackup(raw);
   expect(await db.accounts.count()).toBe(1);
@@ -76,4 +78,9 @@ it("rechaza campos secretos, referencias rotas y versiones desconocidas sin borr
   delete raw.data.accounts[0].privateKey;
   raw.schemaVersion = 999;
   expect(() => validateBackup(raw)).toThrow();
+  for (const schemaVersion of [1, 2]) {
+    raw.schemaVersion = schemaVersion;
+    await expect(restoreBackup(raw)).rejects.toThrow("esquema 3");
+    expect((await db.accounts.get("a"))?.name).toBe("Original");
+  }
 });

@@ -1343,19 +1343,6 @@ tbody tr:hover {
   outline: 2px solid #326c54;
   outline-offset: 2px;
 }
-.import-advanced {
-  margin: 16px 0;
-  padding: 14px;
-  border: 1px solid var(--border, #dce5d9);
-  border-radius: 10px;
-}
-.import-advanced > summary {
-  cursor: pointer;
-  font-weight: 600;
-}
-.import-advanced[open] > summary {
-  margin-bottom: 18px;
-}
 .dropzone span {
   font-size: 11px;
   color: #97a48b;
@@ -1382,10 +1369,6 @@ tbody tr:hover {
 }
 .dropzone.has-file > svg {
   display: none;
-}
-.columns-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  margin: 15px 0;
 }
 .preview-table {
   border: 1px solid var(--border);
@@ -2517,9 +2500,6 @@ tbody tr:hover {
   }
   .form-grid {
     grid-template-columns: 1fr;
-  }
-  .columns-grid {
-    grid-template-columns: 1fr 1fr;
   }
   .field > span {
     font-size: 13px;

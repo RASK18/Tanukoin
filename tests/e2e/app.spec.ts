@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import * as XLSX from "xlsx";
+import { CHAT_MODELS } from "../../src/features/ai/models";
 
 async function createAccount(page: Page) {
   await page.goto("#/cuentas");
@@ -317,9 +318,7 @@ test("certificado PDF une conceptos y selecciona todas las páginas sin repetir 
   ].join("\n");
   await createAccount(page);
   await importFile(page, "certificado-ficticio.pdf", textPdf([first, second]));
-  await expect(
-    page.getByText(/Extracto reconocido: 2 páginas seleccionadas/),
-  ).toBeVisible();
+  await expect(page.getByText(/2 de 2 páginas seleccionadas/)).toBeVisible();
   await page.getByRole("button", { name: "Revisar movimientos" }).click();
   await page.getByRole("button", { name: "Importar 2 movimientos" }).click();
   await expect(
@@ -368,14 +367,11 @@ test("arrastrar archivo detecta columnas y conserva operaciones iguales con dist
     page.getByRole("heading", { name: "Vista previa", exact: true }),
   ).toBeVisible();
   await page.screenshot({ path: "artifacts/import-simple.png" });
-  await page.getByText("Opciones avanzadas", { exact: true }).click();
   await expect(
-    page.getByRole("combobox", { name: "Saldo", exact: true }),
-  ).toHaveValue("0");
-  await expect(
-    page.getByRole("combobox", { name: "Cargo (alternativa)", exact: true }),
-  ).toHaveValue("3");
-  await page.getByText("Opciones avanzadas", { exact: true }).click();
+    page.getByText("Opciones avanzadas", { exact: true }),
+  ).toHaveCount(0);
+  await expect(page.locator(".preview-table")).toContainText("100,00");
+  await expect(page.locator(".preview-table")).toContainText("-4,90");
   await page.getByRole("button", { name: "Revisar movimientos" }).click();
   await expect(
     page.getByText("Posible duplicado", { exact: true }),
@@ -496,3 +492,322 @@ test("diseño de escritorio sin errores de ejecución", async ({ page }) => {
   });
   expect(errors).toEqual([]);
 });
+
+test("crea y cancela cuentas dentro del importador sin perder el archivo, con teclado y móvil", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await importFile(
+    page,
+    "apertura.csv",
+    Buffer.from("Fecha;Concepto;Importe\n20/09/2026;;0"),
+  );
+  const importer = page.getByRole("dialog", {
+    name: "Importar movimientos",
+    exact: true,
+  });
+  await importer
+    .getByRole("button", { name: "Crear cuenta", exact: true })
+    .click();
+  const accountDialog = page.getByRole("dialog", {
+    name: "Nueva cuenta",
+    exact: true,
+  });
+  await accountDialog.getByLabel("Nombre", { exact: true }).fill("Descartar");
+  await page.keyboard.press("Escape");
+  await expect(accountDialog).not.toBeVisible();
+  await expect(importer).toBeVisible();
+  await expect(
+    importer.getByRole("button", { name: "Crear cuenta", exact: true }),
+  ).toBeFocused();
+  await expect(importer).toContainText("apertura.csv");
+  await importer
+    .getByRole("button", { name: "Crear cuenta", exact: true })
+    .click();
+  await accountDialog
+    .getByLabel("Nombre", { exact: true })
+    .fill("Creada al importar");
+  await accountDialog.getByRole("button", { name: "Guardar cuenta" }).click();
+  await expect(accountDialog).not.toBeVisible();
+  await expect(
+    importer.getByRole("combobox", { name: "Cuenta", exact: true }),
+  ).not.toHaveValue("");
+  await expect(importer.locator(".preview-table")).toContainText(
+    "Sin concepto",
+  );
+  await expect(importer.getByText("Opciones avanzadas")).toHaveCount(0);
+  await expect(
+    importer.getByRole("button", { name: "Intentar con IA local" }),
+  ).toHaveCount(0);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({
+    path: "artifacts/import-mobile.png",
+    fullPage: true,
+  });
+  await importer.getByRole("button", { name: "Cerrar", exact: true }).click();
+  await page.goto("#/cuentas");
+  await expect(
+    page.getByRole("heading", { name: "Creada al importar" }),
+  ).toBeVisible();
+  await importFile(
+    page,
+    "apertura.csv",
+    Buffer.from("Fecha;Concepto;Importe\n20/09/2026;;0"),
+  );
+  await page.getByRole("button", { name: "Revisar movimientos" }).click();
+  await page.getByRole("button", { name: "Importar 1 movimientos" }).click();
+  await expect(page.getByText("Sin concepto", { exact: true })).toBeVisible();
+});
+
+test("PDF de 50 páginas se selecciona con rangos y la navegación de vista previa es independiente", async ({
+  page,
+}) => {
+  await createAccount(page);
+  const pdf = textPdf(
+    Array.from(
+      { length: 50 },
+      (_, i) =>
+        `BT /F1 10 Tf 40 760 Td (Fecha) Tj 130 0 Td (Concepto) Tj 200 0 Td (Importe) Tj -330 -24 Td (19/09/2026) Tj 130 0 Td (Movimiento ficticio ${i + 1}) Tj 200 0 Td (-1,00) Tj ET`,
+    ),
+  );
+  await importFile(page, "cincuenta-paginas.pdf", pdf);
+  await expect(
+    page.getByText("50 de 50 páginas seleccionadas · 50 movimientos"),
+  ).toBeVisible();
+  const selection = page.getByRole("group", {
+    name: "Páginas que se importarán",
+  });
+  await expect(selection.getByRole("checkbox")).toHaveCount(0);
+  await selection.getByLabel("Elegir páginas").check();
+  const ranges = selection.getByLabel("Páginas", { exact: true });
+  await expect(
+    page.getByRole("button", { name: "Revisar movimientos" }),
+  ).toBeDisabled();
+  await ranges.fill("1-29");
+  await expect(
+    page.getByText("29 de 50 páginas seleccionadas · 29 movimientos"),
+  ).toBeVisible();
+  await page.getByLabel("Vista previa de página").selectOption("49");
+  await expect(page.locator(".preview-table")).toContainText(
+    "Movimiento ficticio 50",
+  );
+  await expect(ranges).toHaveValue("1-29");
+  await ranges.fill("1-3, 2, 50");
+  await expect(
+    page.getByText("4 de 50 páginas seleccionadas · 4 movimientos"),
+  ).toBeVisible();
+  await ranges.fill("1-51");
+  await expect(
+    page.getByRole("button", { name: "Revisar movimientos" }),
+  ).toBeDisabled();
+  await expect(
+    page.getByText("Las páginas deben estar entre 1 y 50."),
+  ).toBeVisible();
+  await ranges.fill("29-1");
+  await expect(
+    page.getByRole("button", { name: "Revisar movimientos" }),
+  ).toBeDisabled();
+  await ranges.fill("1-29");
+  await page.getByRole("button", { name: "Revisar movimientos" }).click();
+  await expect(
+    page.getByRole("button", { name: "Importar 29 movimientos" }),
+  ).toBeEnabled();
+  await page.getByRole("button", { name: "Volver a vista previa" }).click();
+  await expect(ranges).toHaveValue("1-29");
+  await page
+    .getByLabel("Archivo bancario")
+    .setInputFiles({
+      name: "otra.pdf",
+      mimeType: "application/pdf",
+      buffer: textPdf(),
+    });
+  await expect(selection.getByLabel("Todas las páginas")).toBeChecked();
+  await expect(
+    page.getByText("1 de 1 páginas seleccionadas · 1 movimientos"),
+  ).toBeVisible();
+  await expect(page.getByLabel("Vista previa de página")).toHaveValue("0");
+  await page.setViewportSize({ width: 320, height: 844 });
+  await selection.getByLabel("Elegir páginas").check();
+  await ranges.fill("1");
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({
+    path: "artifacts/import-ranges-mobile.png",
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.screenshot({
+    path: "artifacts/import-ranges-desktop.png",
+    fullPage: true,
+  });
+});
+
+test("una cuenta de moneda incompatible bloquea la importación", async ({
+  page,
+}) => {
+  await createAccount(page);
+  await importFile(
+    page,
+    "otra-moneda.csv",
+    Buffer.from(
+      "Fecha;Concepto;Importe;Divisa\n20/09/2026;Compra ficticia;-10,00;USD",
+    ),
+  );
+  await expect(
+    page.getByText(/La moneda USD no coincide con la cuenta EUR/),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Revisar movimientos" }),
+  ).toBeDisabled();
+  await page.getByRole("button", { name: "Crear cuenta", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Nueva cuenta" });
+  await dialog.getByLabel("Nombre", { exact: true }).fill("Cuenta USD");
+  await dialog.getByLabel("Moneda", { exact: true }).selectOption("USD");
+  await dialog.getByRole("button", { name: "Guardar cuenta" }).click();
+  await expect(
+    page.getByRole("button", { name: "Revisar movimientos" }),
+  ).toBeEnabled();
+  await page.getByRole("button", { name: "Revisar movimientos" }).click();
+  await page.getByRole("button", { name: "Importar 1 movimientos" }).click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+});
+
+for (const invalid of [false, true])
+  test(`IA de importación: solo se ejecuta al pedirla y ${invalid ? "rechaza saldo como importe" : "valida el archivo completo"}`, async ({
+    page,
+    context,
+  }) => {
+    const external: string[] = [];
+    await context.route("**/*", (route) => {
+      const url = new URL(route.request().url());
+      if (url.hostname === "127.0.0.1" || url.hostname === "localhost")
+        return route.continue();
+      external.push(url.origin);
+      return route.abort();
+    });
+    await page.addInitScript(
+      ({ invalid }) => {
+        Object.defineProperty(navigator, "gpu", {
+          configurable: true,
+          value: {
+            requestAdapter: async () => ({
+              features: new Set(["shader-f16"]),
+              limits: { maxBufferSize: 2e9, maxStorageBufferBindingSize: 2e9 },
+            }),
+          },
+        });
+        const NativeWorker = window.Worker;
+        (window as any).importGenerations = 0;
+        window.Worker = class extends EventTarget {
+          onmessage: ((event: MessageEvent) => void) | null = null;
+          constructor(url: string | URL, options?: WorkerOptions) {
+            super();
+            if (!String(url).includes("chat.worker"))
+              return new NativeWorker(url, options);
+          }
+          terminate() {}
+          postMessage(message: any) {
+            if (!message.uuid) return;
+            let content: unknown = null;
+            if (message.kind === "chatCompletionNonStreaming") {
+              (window as any).importGenerations++;
+              const result = {
+                headerRow: 0,
+                dateFormat: "DMY",
+                decimal: ",",
+                columns: {
+                  date: 0,
+                  description: 1,
+                  amount: invalid ? 3 : 2,
+                  balance: invalid ? 2 : 3,
+                  debit: -1,
+                  credit: -1,
+                  merchant: -1,
+                  externalId: -1,
+                },
+              };
+              content = {
+                choices: [
+                  {
+                    message: { content: JSON.stringify(result) },
+                    finish_reason: "stop",
+                  },
+                ],
+                usage: { prompt_tokens: 10, completion_tokens: 10 },
+              };
+            }
+            queueMicrotask(() =>
+              this.onmessage?.(
+                new MessageEvent("message", {
+                  data: { kind: "return", uuid: message.uuid, content },
+                }),
+              ),
+            );
+          }
+        } as unknown as typeof Worker;
+      },
+      { invalid },
+    );
+    await createAccount(page);
+    await page.evaluate(async (model) => {
+      const request = indexedDB.open("tanukoin");
+      const database = await new Promise<IDBDatabase>((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      const tx = database.transaction("models", "readwrite");
+      const record = {
+        id: model.key,
+        modelKey: model.key,
+        ready: true,
+        revision: model.revision,
+        savedAt: "2026-09-23",
+      };
+      tx.objectStore("models").put(record);
+      tx.objectStore("models").put({ ...record, id: "chat" });
+      await new Promise<void>((resolve, reject) => {
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+      database.close();
+    }, CHAT_MODELS[1]);
+    await importFile(
+      page,
+      "desconocido.csv",
+      Buffer.from(
+        "Día contable;Detalle libre;Total anotado;Saldo\n20/09/2026;Compra ficticia;-12,50;87,50",
+      ),
+    );
+    const assist = page.getByRole("button", { name: "Intentar con IA local" });
+    await expect(assist).toBeVisible();
+    expect(await page.evaluate(() => (window as any).importGenerations)).toBe(
+      0,
+    );
+    await assist.click();
+    await expect
+      .poll(() => page.evaluate(() => (window as any).importGenerations))
+      .toBe(1);
+    if (invalid) {
+      await expect(
+        page.getByText(
+          /La IA no ha podido reconocer el formato de forma fiable/,
+        ),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: "Revisar movimientos" }),
+      ).toBeDisabled();
+    } else {
+      await expect(
+        page.getByRole("button", { name: "Revisar movimientos" }),
+      ).toBeEnabled();
+      await expect(page.locator(".preview-table")).toContainText("-12,50");
+    }
+    expect(external).toEqual([]);
+  });
