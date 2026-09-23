@@ -29,7 +29,7 @@ const gpu = (
   buffer: number,
 ): ChatModel => ({
   key: `chat:gpu-${size.toLowerCase()}`,
-  name: `Qwen3.5 ${size} · GPU ${vram} GB`,
+  name: `Qwen3.5 ${size}`,
 
   modelId: `Qwen3.5-${size}-q4f16_1-MLC`,
   revision,
@@ -42,7 +42,7 @@ const gpu = (
   contextSize: 4096,
   experimental: size === "9B",
 
-  description: "MLC q4f16_1 · generación con la tarjeta gráfica.",
+  description: "MLC q4f16_1",
 
   requirements: `Perfil objetivo: ${vram} GB de VRAM. WebGPU y shader-f16; la memoria real depende del equipo y del contexto.`,
 });

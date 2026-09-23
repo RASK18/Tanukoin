@@ -7,7 +7,7 @@ import {
   reconcileChatModels,
   uninstallChatFiles,
 } from "./model-store";
-import { detectHardware, incompatibility } from "./hardware";
+import { checkWebGPU, incompatibility } from "./webgpu";
 import {
   cleanGeneration,
   fitMessages,
@@ -63,15 +63,15 @@ async function load(
   if (loaded === model.key) return;
   dispose();
   const ticket = epoch;
-  const hardware = await detectHardware();
-  const reason = incompatibility(model, hardware);
+  const webgpu = await checkWebGPU();
+  const reason = incompatibility(model, webgpu);
   if (reason) throw new Error(reason);
   if (ticket !== epoch) throw new Error("Operación cancelada");
   const { CreateWebWorkerMLCEngine } = await import("@mlc-ai/web-llm");
   const record = await gpuModelRecord(model);
   if (
     record.buffer_size_required_bytes &&
-    hardware.maxBinding < record.buffer_size_required_bytes
+    webgpu.maxBinding < record.buffer_size_required_bytes
   )
     throw new Error(
       "La GPU no admite el tamaño de búfer requerido por este modelo.",
@@ -226,14 +226,12 @@ export function prepareChatModel(
         throw new Error(
           "El modelo cargó, pero no superó la comprobación de generación.",
         );
-      const hardware = await detectHardware();
       if (ticket !== epoch) throw new Error("Operación cancelada");
       await db.transaction("rw", db.models, async () => {
         const ready = {
           ...state,
           ready: true,
           preparing: false,
-          checkedDevice: hardware.device,
         };
         await db.models.put(ready);
         await db.models.put({ ...ready, id: "chat" });

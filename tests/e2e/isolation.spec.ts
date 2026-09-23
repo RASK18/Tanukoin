@@ -145,13 +145,13 @@ test("solo GPU y 9B experimental sin activación ni descargas", async ({
   await expect(page.getByRole("tab")).toHaveCount(0);
   await expect(page.getByLabel("Hilos de CPU")).toHaveCount(0);
   await expect(page.locator(".chat-models .model-card")).toHaveCount(3);
-  const experimental = page.getByLabel("Modelo Qwen3.5 9B · GPU 12 GB", {
+  const experimental = page.getByLabel("Modelo Qwen3.5 9B", {
     exact: true,
   });
   await expect(experimental.locator(".experimental-badge")).toHaveText(
     "Experimental",
   );
-  await expect(experimental).toContainText(
+  await expect(experimental).not.toContainText(
     "Pendiente de pruebas reales en equipos de 12 GB de VRAM",
   );
   expect(external).toEqual([]);

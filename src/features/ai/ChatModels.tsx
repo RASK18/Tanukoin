@@ -1,7 +1,14 @@
 import { useEffect, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 
-import { Check, Download, Trash2, X, Monitor } from "lucide-react";
+import {
+  Download,
+  Trash2,
+  X,
+  Monitor,
+  MemoryStick,
+  Archive,
+} from "lucide-react";
 
 import { db } from "../../data/db";
 import { useApp } from "../../components/ui";
@@ -12,11 +19,10 @@ import { cachedModelSize, discoverCpuDownloads } from "./model-store";
 import { cancelChat, prepareChatModel, removeChatModel } from "./chat-runtime";
 
 import {
-  detectHardware,
+  checkWebGPU,
   incompatibility,
-  recommendModel,
-  type Hardware,
-} from "./hardware";
+  type WebGPUCapabilities,
+} from "./webgpu";
 
 const size = (bytes: number) =>
   `${(bytes / 1e9).toLocaleString("es", { maximumFractionDigits: 2 })} GB`;
@@ -31,16 +37,14 @@ export function ChatModels({
 
   const states = useLiveQuery(() => db.models.toArray(), []) || [];
 
-  const [hardware, setHardware] = useState<Hardware>();
+  const [webgpu, setWebGPU] = useState<WebGPUCapabilities>();
   const [working, setWorking] = useState<string>(),
     [progress, setProgress] = useState(0);
   const [sizes, setSizes] = useState<Record<string, number | undefined>>({});
   const active = activeChatModel(states),
     retired = retiredModels(states);
 
-  const recommendation = hardware && recommendModel(hardware, states);
-  const compatibilityIssue =
-    hardware && incompatibility(CHAT_MODELS[0], hardware);
+  const compatibilityIssue = webgpu && incompatibility(CHAT_MODELS[0], webgpu);
 
   useEffect(() => {
     onWorking?.(!!working);
@@ -48,8 +52,8 @@ export function ChatModels({
   useEffect(() => {
     void discoverCpuDownloads().catch(() => {});
 
-    void detectHardware()
-      .then(setHardware)
+    void checkWebGPU()
+      .then(setWebGPU)
       .catch((e) => notify(String(e)));
   }, []);
   const retiredIds = retired.map((s) => s.id).join("|");
@@ -78,7 +82,7 @@ export function ChatModels({
     } finally {
       setWorking(undefined);
       setBusy(false);
-      setHardware(await detectHardware());
+      setWebGPU(await checkWebGPU());
     }
   }
   async function remove(key: string) {
@@ -97,12 +101,6 @@ export function ChatModels({
 
   return (
     <section aria-label="Modelos de Tanu" className="chat-models gpu-models">
-      <h2>Elige cómo hablar con Tanu</h2>
-      <p>
-        Un solo modelo de chat en memoria. Puedes cambiar de opción conservando
-        las descargas.
-      </p>
-
       {compatibilityIssue && (
         <div className="notice" role="alert">
           <strong>Tanu no puede funcionar con la GPU en este navegador.</strong>
@@ -114,86 +112,70 @@ export function ChatModels({
         </div>
       )}
 
-      <p className="notice" role="status">
-        {recommendation
-          ? `Recomendado: ${CHAT_MODELS.find((m) => m.key === recommendation.key)!.name}. ${recommendation.reason}`
-          : "Comprobando compatibilidad del dispositivo…"}
-      </p>
-      {hardware && (
-        <section
-          className="device-profile"
-          aria-labelledby="device-profile-title"
-        >
-          <h3 id="device-profile-title">Perfil detectado del dispositivo</h3>
-          <dl className="device-profile-grid">
-            <div>
-              <dt>Núcleos CPU (lógicos)</dt>
-              <dd>{hardware.cpuThreads ?? "No disponible"}</dd>
-            </div>
-            <div>
-              <dt>RAM aproximada</dt>
-              <dd>
-                {hardware.ramGB ? `${hardware.ramGB} GB` : "No disponible"}
-              </dd>
-            </div>
-            <div>
-              <dt>WebGPU</dt>
-              <dd>
-                {hardware.gpu ? (
-                  <>
-                    <Check size={17} aria-hidden="true" /> Disponible
-                  </>
-                ) : (
-                  "No disponible"
-                )}
-              </dd>
-            </div>
-            <div>
-              <dt>Dispositivo</dt>
-              <dd>
-                {hardware.deviceType === "mobile"
-                  ? "Móvil / tableta"
-                  : hardware.deviceType === "desktop"
-                    ? "Escritorio"
-                    : "No disponible"}
-              </dd>
-            </div>
-          </dl>
-          <p className="muted">
-            Perfil orientativo según el navegador; puede limitar los datos por
-            privacidad. RAM del equipo, no VRAM. La preparación del modelo
-            confirma la compatibilidad.
+      <div className="chat-catalog-heading">
+        <div>
+          <h2>Modelos de chat en memoria</h2>
+          <p>
+            Elige un modelo para chatear. Puedes cambiar de opción conservando
+            las descargas.
           </p>
-        </section>
-      )}
-
+        </div>
+        <span
+          className={`webgpu-indicator ${!webgpu ? "pending" : compatibilityIssue ? "unavailable" : "available"}`}
+          role="status"
+        >
+          {!webgpu
+            ? "Comprobando WebGPU…"
+            : compatibilityIssue
+              ? "WebGPU no compatible"
+              : "WebGPU disponible"}
+        </span>
+      </div>
       <div>
         <div className="model-grid chat-model-grid">
           {CHAT_MODELS.map((model) => {
             const state = states.find((s) => s.id === model.key);
             const ready = state?.ready && state.revision === model.revision;
-            const reason = hardware && incompatibility(model, hardware);
-            const blocked = disabled || !!working || !hardware || !!reason;
+            const reason = webgpu && incompatibility(model, webgpu);
+            const blocked = disabled || !!working || !webgpu || !!reason;
             return (
               <section
-                className={`card model-card ${recommendation?.key === model.key ? "recommended-model" : ""}`}
+                className={`card model-card ${model.key === "chat:gpu-4b" ? "recommended-model" : ""}`}
 
                 key={model.key}
                 aria-label={`Modelo ${model.name}`}
               >
-                {model.experimental && (
-                  <span
-                    className="experimental-badge"
-                    title="Pendiente de pruebas reales en equipos de 12 GB de VRAM"
-                  >
-                    Experimental
-                  </span>
-                )}
-
                 <div className="card-heading">
                   <span className="feature-icon sage">
-                    <Monitor size={22} />
+                    <Monitor size={20} />
                   </span>
+                  <h3>
+                    {model.name}
+                    {active?.key === model.key && " · En uso"}
+                  </h3>
+                </div>
+                <div className="model-badges">
+                  {model.key === "chat:gpu-4b" && (
+                    <span className="recommended-badge">Recomendado</span>
+                  )}
+                  {model.experimental && (
+                    <span className="experimental-badge">Experimental</span>
+                  )}
+                </div>
+
+                <p>{model.description}</p>
+
+                <dl>
+                  <dt>
+                    <Download size={15} /> Descarga aproximada
+                  </dt>
+                  <dd>{size(model.downloadBytes)} + recursos auxiliares</dd>
+                  <dt>
+                    <MemoryStick size={15} /> Requisitos
+                  </dt>
+                  <dd>{model.requirements}</dd>
+                </dl>
+                <div className="model-readiness">
                   <span className={`model-status ${ready ? "ready" : ""}`}>
                     {working === model.key || state?.preparing
                       ? "Preparando"
@@ -204,30 +186,6 @@ export function ChatModels({
                           : "Sin preparar"}
                   </span>
                 </div>
-                <h3>
-                  {model.name}
-                  {active?.key === model.key && " · En uso"}
-                </h3>
-                <p>{model.description}</p>
-
-                {recommendation?.key === model.key && (
-                  <p>
-                    <Check size={16} /> Recomendado para este equipo
-                  </p>
-                )}
-
-                {model.experimental && (
-                  <p className="notice">
-                    Pendiente de pruebas reales en equipos de 12 GB de VRAM
-                  </p>
-                )}
-
-                <dl>
-                  <dt>Descarga aproximada</dt>
-                  <dd>{size(model.downloadBytes)} + recursos auxiliares</dd>
-                  <dt>Requisitos</dt>
-                  <dd>{model.requirements}</dd>
-                </dl>
                 {reason && <p className="notice">{reason}</p>}
                 {state?.error && <p role="status">{state.error}</p>}
                 {working === model.key && (
@@ -296,31 +254,40 @@ export function ChatModels({
         </div>
       </div>
       {!!retired.length && (
-        <section className="card" aria-label="Modelos retirados">
-          <h3>Modelos retirados</h3>
-          <p>
-            Estos modelos ya no pueden utilizarse. Desinstálalos e instala uno
-            del catálogo actual para seguir usando Tanu. Sus archivos se
-            conservan hasta que los desinstales.
-          </p>
-          {retired.map((model) => (
-            <div key={model.id} className="button-row">
-              <span>
-                {model.name || model.modelId || model.id} ·{" "}
-                {sizes[model.id] === undefined
-                  ? "Espacio ocupado no disponible"
-                  : size(sizes[model.id]!)}
-              </span>
-              <button
-                className="button secondary"
-                disabled={disabled || !!working}
-                onClick={() => void remove(model.id)}
-              >
-                <Trash2 size={16} />
-                Desinstalar
-              </button>
+        <section className="card retired-models" aria-label="Modelos retirados">
+          <div className="retired-intro">
+            <span className="feature-icon cream">
+              <Archive size={22} />
+            </span>
+            <div>
+              <h3>Modelos retirados</h3>
+              <p>
+                Estos modelos ya no pueden utilizarse. Desinstálalos e instala
+                uno del catálogo actual para seguir usando Tanu. Sus archivos se
+                conservan hasta que los desinstales.
+              </p>
             </div>
-          ))}
+          </div>
+          <div className="retired-list">
+            {retired.map((model) => (
+              <div key={model.id} className="button-row">
+                <span>
+                  {model.name || model.modelId || model.id} ·{" "}
+                  {sizes[model.id] === undefined
+                    ? "Espacio ocupado no disponible"
+                    : size(sizes[model.id]!)}
+                </span>
+                <button
+                  className="button secondary"
+                  disabled={disabled || !!working}
+                  onClick={() => void remove(model.id)}
+                >
+                  <Trash2 size={16} />
+                  Desinstalar
+                </button>
+              </div>
+            ))}
+          </div>
         </section>
       )}
     </section>

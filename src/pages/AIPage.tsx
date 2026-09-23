@@ -1,6 +1,19 @@
 import { useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { Download, Sparkles, Check, Trash2, Cpu, X } from "lucide-react";
+import {
+  Download,
+  Sparkles,
+  Check,
+  Trash2,
+  Cpu,
+  X,
+  LockKeyhole,
+  Tags,
+  Zap,
+  Target,
+  ShieldCheck,
+} from "lucide-react";
+import "./ai-page.css";
 import { db } from "../data/db";
 import { useApp, PageTitle } from "../components/ui";
 import {
@@ -35,17 +48,34 @@ export function AIPage() {
     }
   }
   return (
-    <>
+    <div className="ai-page">
       <PageTitle
         eyebrow="INTELIGENCIA QUE SE QUEDA CONTIGO"
         title="IA local, de verdad"
         description="Los modelos se descargan en tu dispositivo. Tus movimientos y preguntas se quedan aquí."
+        action={
+          <div className="ai-privacy">
+            <div className="ai-privacy-note">
+              <LockKeyhole size={22} />
+              <span>
+                <strong>100% en tu dispositivo</strong>
+                <small>Tus consultas se procesan aquí.</small>
+              </span>
+            </div>
+            <img src={`${import.meta.env.BASE_URL}tanu.webp`} alt="" />
+            <span className="ai-privacy-script">
+              Tu privacidad
+              <br />
+              es tu poder ♡
+            </span>
+          </div>
+        }
       />
       <ChatModels
         disabled={working !== null || classifying}
         onWorking={setChatWorking}
       />
-      <div className="model-grid">
+      <div className="ai-tools-grid">
         {(
           [
             {
@@ -141,89 +171,104 @@ export function AIPage() {
             </section>
           );
         })}
-      </div>
-      <section className="card">
-        <div className="card-heading">
-          <h2>Categorización de tu historial</h2>
-          <Sparkles size={18} />
-        </div>
-        <p>
-          Se respetan tus categorías manuales y reglas. La IA asigna las
-          coincidencias claras; las dudosas aparecen como sugerencias. Puedes
-          revertir las asignaciones automáticas.
-        </p>
-        <div className="button-row">
-          <button
-            className="button primary"
-            disabled={
-              classifying ||
-              chatWorking ||
-              working !== null ||
-              !models.find((m) => m.id === "embeddings")?.ready ||
-              !data.movements.length
-            }
-            onClick={async () => {
-              setClassifying(true);
-              setBusy(true);
-              try {
-                const result = await categorize(
-                  data.movements,
-                  data.categories,
-                  data.movements,
-                );
-                await run(
-                  db.transaction("rw", db.movements, async () => {
-                    for (const row of result) {
-                      const latest = await db.movements.get(row.id);
-                      if (
-                        latest &&
-                        (latest.categorySource === "none" ||
-                          latest.categorySource === "ai")
-                      )
-                        await db.movements.update(row.id, {
-                          categoryId: row.categoryId,
-                          categorySource: row.categorySource,
-                          aiSuggestion: row.aiSuggestion,
-                        });
-                    }
-                  }),
-                  "Categorización terminada. Revisa las sugerencias en Movimientos.",
-                );
-              } catch (e) {
-                notify(String(e));
-              } finally {
-                setClassifying(false);
-                setBusy(false);
+        <section className="card ai-categorization">
+          <div className="card-heading">
+            <span className="feature-icon sage">
+              <Tags size={23} />
+            </span>
+            <h2>Categorización de tu historial</h2>
+          </div>
+          <p>
+            Se respetan tus categorías manuales y reglas. La IA asigna las
+            coincidencias claras; las dudosas aparecen como sugerencias. Puedes
+            revertir las asignaciones automáticas.
+          </p>
+          <div className="ai-benefits">
+            <span>
+              <Zap size={18} /> Menos trabajo manual
+            </span>
+            <span>
+              <Target size={18} /> Sugerencias locales
+            </span>
+            <span>
+              <ShieldCheck size={18} /> Tus decisiones se respetan
+            </span>
+          </div>
+          <div className="button-row">
+            <button
+              className="button primary"
+              disabled={
+                classifying ||
+                chatWorking ||
+                working !== null ||
+                !models.find((m) => m.id === "embeddings")?.ready ||
+                !data.movements.length
               }
-            }}
-          >
-            <Sparkles size={16} />
-            {classifying ? "Analizando localmente…" : "Categorizar movimientos"}
-          </button>
-          <button
-            className="button secondary"
-            onClick={() =>
-              run(
-                db.movements
-                  .filter((m) => m.categorySource === "ai")
-                  .modify({
-                    categoryId: undefined,
-                    categorySource: "none",
-                    aiSuggestion: undefined,
-                  }),
-                "Asignaciones automáticas revertidas",
-              )
-            }
-          >
-            Revertir categorías de IA
-          </button>
-        </div>
-      </section>
-      <p className="muted">
+              onClick={async () => {
+                setClassifying(true);
+                setBusy(true);
+                try {
+                  const result = await categorize(
+                    data.movements,
+                    data.categories,
+                    data.movements,
+                  );
+                  await run(
+                    db.transaction("rw", db.movements, async () => {
+                      for (const row of result) {
+                        const latest = await db.movements.get(row.id);
+                        if (
+                          latest &&
+                          (latest.categorySource === "none" ||
+                            latest.categorySource === "ai")
+                        )
+                          await db.movements.update(row.id, {
+                            categoryId: row.categoryId,
+                            categorySource: row.categorySource,
+                            aiSuggestion: row.aiSuggestion,
+                          });
+                      }
+                    }),
+                    "Categorización terminada. Revisa las sugerencias en Movimientos.",
+                  );
+                } catch (e) {
+                  notify(String(e));
+                } finally {
+                  setClassifying(false);
+                  setBusy(false);
+                }
+              }}
+            >
+              <Sparkles size={16} />
+              {classifying
+                ? "Analizando localmente…"
+                : "Categorizar movimientos"}
+            </button>
+            <button
+              className="button secondary"
+              onClick={() =>
+                run(
+                  db.movements
+                    .filter((m) => m.categorySource === "ai")
+                    .modify({
+                      categoryId: undefined,
+                      categorySource: "none",
+                      aiSuggestion: undefined,
+                    }),
+                  "Asignaciones automáticas revertidas",
+                )
+              }
+            >
+              Revertir categorías de IA
+            </button>
+          </div>
+        </section>
+      </div>
+      <p className="muted ai-storage-note">
         El navegador puede eliminar su almacenamiento. Si falta algún archivo
         del modelo, se solicitará descargarlo otra vez; nunca se usará una IA
         remota como alternativa.
       </p>
-    </>
+    </div>
   );
 }

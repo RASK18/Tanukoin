@@ -78,7 +78,7 @@ Para diagnosticar un subconjunto, `TEST_CHAT_SMOKE=1` hace una sola vuelta y `TE
 | 8 GB de VRAM    | Qwen3.5 4B MLC q4f16_1                | 2,37 GB           |
 | 12 GB de VRAM   | Qwen3.5 9B MLC q4f16_1 · Experimental | 5,04 GB           |
 
-WebLLM es el único motor conversacional. Todas las variantes usan contexto total 4096 y pensamiento desactivado. La tarjeta de 9B indica que está pendiente de pruebas reales en equipos de 12 GB de VRAM. Transformers.js mantiene los embeddings con su motor independiente.
+WebLLM es el único motor conversacional. Todas las variantes usan contexto total 4096 y pensamiento desactivado. 9B conserva la etiqueta Experimental y sigue pendiente de pruebas reales en equipos de 12 GB de VRAM. Transformers.js mantiene los embeddings con su motor independiente.
 
 Tanu necesita WebGPU compatible, `shader-f16` y límites de búfer suficientes. Si la API no existe, devuelve un adaptador nulo o el navegador bloquea su acceso, se muestra un aviso y se impide descargar o activar los modelos. No se ofrece alternativa CPU. La comprobación no puede garantizar memoria libre ni identificar siempre la causa del bloqueo. El resto de Tanukoin sigue disponible.
 
@@ -94,7 +94,7 @@ Para una comparación corta con datos ficticios, compila con `TANUKOIN_AI_EVAL=1
 
 Para la regresión breve de identidad, funciones y longitud, usa `TEST_CHAT_STYLE=1` en lugar de `TEST_CHAT_COMPARE`, junto con `TEST_CHAT_SMOKE=1` y `TEST_CHAT_CASES=03,07,24,33`. Guarda ocho respuestas de siete conversaciones ficticias en `style-<variante>.json`, comprueba sus límites de palabras y las afirmaciones sobre funciones inexistentes. Revisa también el contenido completo del informe: las comprobaciones de texto no garantizan exactitud semántica. Libera la GPU de otros modelos antes de ejecutar esta prueba.
 
-Las cifras de descarga no equivalen a RAM o VRAM necesaria. Los niveles GPU son perfiles objetivo, sin una reserva obligatoria de 3 GB. El navegador no permite deducir la VRAM a partir de RAM ni garantiza memoria libre suficiente. Se recomienda inicialmente 2B GPU, y 4B solo tras comprobarlo en esa GPU. La selección activa compatible se conserva aunque cambie la recomendación.
+Las cifras de descarga no equivalen a RAM o VRAM necesaria. Los niveles GPU son perfiles objetivo, sin una reserva obligatoria de 3 GB. El navegador no permite deducir la VRAM a partir de RAM ni garantiza memoria libre suficiente. 4B es la recomendación fija del catálogo; no cambia la selección activa. Solo se comprueba WebGPU: no se consultan núcleos CPU, RAM ni tipo de dispositivo. El resultado se muestra como un punto verde o rojo con texto junto a la cabecera del catálogo.
 
 La opción CPU se ha retirado por los resultados de velocidad y calidad. Las pruebas reales también detectan fallos críticos de calidad en GPU 2B/4B; no se declara una variante validada sin superar la batería exigida. Véanse [resultados y limitaciones](docs/evaluacion-modelos.md).
 

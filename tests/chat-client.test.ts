@@ -15,11 +15,10 @@ import {
 } from "../src/features/ai/models";
 import { reconcileChatModels } from "../src/features/ai/model-store";
 import {
-  detectHardware,
-  recommendModel,
+  checkWebGPU,
   incompatibility,
-  type Hardware,
-} from "../src/features/ai/hardware";
+  type WebGPUCapabilities,
+} from "../src/features/ai/webgpu";
 
 const {
   create,
@@ -60,14 +59,11 @@ vi.mock("@mlc-ai/web-llm", () => ({
 }));
 const balanced = CHAT_MODELS[1],
   advanced = CHAT_MODELS[2];
-const hardware: Hardware = {
-  wasm: true,
+const webgpu: WebGPUCapabilities = {
   gpu: true,
   f16: true,
   maxBuffer: 1e9,
   maxBinding: 1e9,
-  ramGB: 8,
-  device: "ficticia",
 };
 const state = (model = balanced) => ({
   id: model.key,
@@ -299,35 +295,31 @@ it("cancelar durante la carga conserva la instalación y permite reintentarlo", 
   expect(activeChatModel(await db.models.toArray())?.key).toBe(balanced.key);
   expect(await completion("s", "q", true)).toBe('{"ready":true}');
 });
-it("recomienda sin inferir VRAM de RAM y nunca recomienda 9B automáticamente", () => {
-  expect(recommendModel({ ...hardware, gpu: false }, []).key).toBe(
-    "chat:gpu-2b",
-  );
-  expect(recommendModel({ ...hardware, ramGB: 128 }, []).key).toBe(
-    "chat:gpu-2b",
-  );
-  expect(
-    recommendModel(hardware, [
-      { ...state(advanced), checkedDevice: hardware.device },
-    ]).key,
-  ).toBe("chat:gpu-2b");
-  expect(
-    recommendModel(hardware, [
-      { ...state(balanced), checkedDevice: hardware.device },
-    ]).key,
-  ).toBe("chat:gpu-4b");
-  expect(
-    recommendModel(hardware, [{ ...state(balanced), checkedDevice: "otra" }])
-      .key,
-  ).toBe("chat:gpu-2b");
+it("comprueba WebGPU sin consultar CPU, RAM ni tipo de dispositivo", async () => {
+  const readProfile = vi.fn(() => {
+    throw new Error("No se debe consultar el perfil del dispositivo");
+  });
+  for (const property of [
+    "hardwareConcurrency",
+    "deviceMemory",
+    "userAgent",
+    "userAgentData",
+    "maxTouchPoints",
+  ]) {
+    Object.defineProperty(navigator, property, { get: readProfile });
+  }
+  expect(await checkWebGPU()).toEqual(webgpu);
+  expect(readProfile).not.toHaveBeenCalled();
+});
+it("comprueba los límites de WebGPU por modelo", () => {
   expect(
     incompatibility(CHAT_MODELS[0], {
-      ...hardware,
+      ...webgpu,
       maxBinding: 256 * 1024 * 1024,
     }),
   ).toBeUndefined();
   expect(
-    incompatibility(balanced, { ...hardware, maxBinding: 256 * 1024 * 1024 }),
+    incompatibility(balanced, { ...webgpu, maxBinding: 256 * 1024 * 1024 }),
   ).toBeTruthy();
 });
 it("promueve 4B GPU conservando selección, revisión y recursos probados", async () => {
@@ -375,7 +367,7 @@ it.each(["absent", "null", "blocked"])(
               },
             },
     });
-    const detected = await detectHardware();
+    const detected = await checkWebGPU();
     expect(detected.gpu).toBe(false);
     expect(incompatibility(CHAT_MODELS[0], detected)).toContain("WebGPU");
     await expect(prepareChatModel(CHAT_MODELS[0].key, true)).rejects.toThrow(

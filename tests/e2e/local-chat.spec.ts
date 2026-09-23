@@ -138,7 +138,7 @@ for (const variant of ["gpu-2b", "gpu-4b"])
       await page.waitForFunction(() => !!navigator.serviceWorker.controller);
       await page.reload();
       await page.waitForFunction(() => !!window.tanuTest);
-      report.hardware = await page.evaluate(() => window.tanuTest.hardware());
+      report.hardware = await page.evaluate(() => window.tanuTest.webgpu());
       if (variant === "gpu-4b") {
         try {
           report.physicalGpu = execFileSync(

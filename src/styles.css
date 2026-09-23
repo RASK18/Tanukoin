@@ -5,9 +5,6 @@
 .chat-model-grid .model-card {
   position: relative;
 }
-.chat-model-grid .model-card:has(.experimental-badge) {
-  padding-top: 3rem;
-}
 .experimental-badge {
   position: absolute;
   top: 0.65rem;

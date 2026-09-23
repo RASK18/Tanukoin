@@ -4,7 +4,7 @@ import { normalize } from "../../lib/finance";
 import { EMBEDDING_CACHE, MODEL_REVISION } from "./constants";
 import { cancelChat, prepareChatModel, removeChatModel } from "./chat-runtime";
 import { getActiveChatModel } from "./model-store";
-import { detectHardware, incompatibility } from "./hardware";
+import { checkWebGPU, incompatibility } from "./webgpu";
 import { CHAT_MODELS } from "./models";
 export { completion } from "./chat-runtime";
 let embeddingWorker: Worker | null = null;
@@ -56,7 +56,7 @@ export function cancelModel(id: "embeddings" | "chat") {
   pending.clear();
 }
 export async function gpuAvailable() {
-  return !incompatibility(CHAT_MODELS[1], await detectHardware());
+  return !incompatibility(CHAT_MODELS[1], await checkWebGPU());
 }
 export async function prepareModel(
   id: "embeddings" | "chat",

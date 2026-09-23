@@ -9,7 +9,7 @@ import {
   askAssistant,
   emptyConversation,
 } from "../../src/features/ai/assistant";
-import { detectHardware } from "../../src/features/ai/hardware";
+import { checkWebGPU } from "../../src/features/ai/webgpu";
 import { chatFixture, chatScenarios } from "../ai-corpus";
 import { db } from "../../src/data/db";
 import {
@@ -22,7 +22,7 @@ export const harness = {
   generate: generateChat,
   cancel: cancelChat,
   remove: removeChatModel,
-  hardware: detectHardware,
+  webgpu: checkWebGPU,
   models: () => db.models.toArray(),
   async importCheck() {
     const rows = [

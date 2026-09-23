@@ -1,6 +1,6 @@
 # Contexto de Tanukoin
 
-Última revisión: 22 de septiembre de 2026. Referencia funcional: commit `4e88a14`, publicado y comprobado como **0.1.6**. Esta es una referencia histórica, no una afirmación de la versión vigente en futuras tareas: comprobar Git, los workflows y `version.json` cuando sea necesario.
+Última revisión: 23 de septiembre de 2026. Referencia funcional: commit `4e88a14`, publicado y comprobado como **0.1.6**. Esta es una referencia histórica, no una afirmación de la versión vigente en futuras tareas: comprobar Git, los workflows y `version.json` cuando sea necesario.
 
 ## Propósito y decisiones
 
@@ -66,6 +66,13 @@ La presencia de una función en código no sustituye las validaciones reales pen
 
 ## Navegación y distribución
 
+### Aspecto de IA local
+
+- La pantalla de IA presenta una cabecera con Tanu y privacidad, tres tarjetas de chat, modelos retirados en una franja y embeddings/categorización en dos columnas. El catálogo se adapta al ancho disponible y se apila en móvil. Los estilos específicos están en `src/pages/ai-page.css`.
+- Se eliminan el perfil de hardware y «¿Qué modelo me conviene?». `webgpu.ts` sustituye a `hardware.ts`: solo consulta disponibilidad de WebGPU, shader-f16 y límites de búfer. No lee núcleos CPU, RAM, tipo de dispositivo ni identidad de la GPU; deja de registrar `checkedDevice`, conservando los campos históricos existentes sin usarlos para recomendar. Un punto verde/rojo con texto ocupa el lugar de la ayuda; mientras se comprueba, aparece gris. Los avisos de incompatibilidad y bloqueos de descarga/activación siguen vigentes.
+- Qwen3.5 4B es siempre Recomendado, sin cambiar el modelo activo. Los nombres aparecen junto al icono y ya no incluyen «GPU N GB»; la VRAM objetivo permanece en Requisitos. Recomendado y Experimental se sitúan sobre el borde superior. Se eliminan las frases redundantes de generación/compatibilidad y la nota de pruebas pendientes de la tarjeta 9B. Comprobar offline y Desinstalar comparten fila.
+- Validación del cambio: compilación con tipos, suite de 90 pruebas unitarias y, tras añadir la regresión de privacidad, las 22 pruebas de chat-client; 14 pruebas de navegador en Edge (tanu e isolation) superadas. Capturas a 1440, 1024, 390 y 320 px, con revisión visual de escritorio y móvil y comprobaciones de alineación y ausencia de desbordamiento. Instalación y WebGPU simulados, sin descargas ni ejecución de modelos reales. Cambio local, sin publicación.
+
 - La marca (Tanu y nombre Tanukoin) encabeza la barra lateral. Se elimina la topbar y su buscador; la búsqueda sigue disponible en Movimientos.
 - El pie de la barra lateral reúne el mensaje «Datos solo en este navegador / Sin sincronización en la nube», el estado de conexión y la versión. Sustituye la ilustración repetida y los avisos redundantes de la cabecera.
 - En móvil, un botón independiente abre y cierra la barra lateral; el menú cerrado no recibe foco y la barra permite desplazamiento en pantallas bajas.
@@ -122,7 +129,7 @@ Se contrastó un documento privado completo localmente y se verificó el flujo d
 ## Tanu: arquitectura conversacional y modelos locales
 
 - Catálogo de tres variantes, exclusivamente GPU: Qwen3.5 2B/4B/9B MLC q4f16_1 para perfiles objetivo de 4/8/12 GB de VRAM. 9B lleva Experimental y permanece pendiente de ejecución real en un equipo de 12 GB. Revisiones fijadas en `models.ts`; descarga, RAM y VRAM se distinguen, sin reserva obligatoria de 3 GB.
-- Interfaz verde sin pestañas ni selector CPU. Si WebGPU está ausente, devuelve adaptador nulo o rechaza el acceso, se avisa de que Tanu no puede funcionar y se bloquean descarga/activación. Se comprueban también shader-f16 y límites de búfer; esto no acredita memoria libre ni identifica siempre la causa de un bloqueo. Se recomienda inicialmente 2B, o 4B si consta comprobación satisfactoria en esa GPU. No se deduce VRAM de RAM aproximada ni se cambia la selección activa por otra recomendación.
+- Interfaz verde sin pestañas ni selector CPU. Si WebGPU está ausente, devuelve adaptador nulo o rechaza el acceso, se avisa de que Tanu no puede funcionar y se bloquean descarga/activación. Se comprueban también shader-f16 y límites de búfer; esto no acredita memoria libre ni identifica siempre la causa de un bloqueo. Se recomienda siempre 4B, sin consultar CPU, RAM ni tipo de dispositivo, y sin cambiar la selección activa.
 - WebLLM es el único motor conversacional: un worker parametrizado por modelo, una sola variante residente, contexto total 4096, pensamiento desactivado, `max_history_size: 1` e historial explícito. Se mantienen mensajes, JSON Schema, límites de respuesta, métricas, cancelación y validación de aplicación. Embeddings conserva Transformers.js y su motor independiente.
 - Por decisión del usuario se retira toda ejecución CPU tras no encontrar una variante que cumpla velocidad y calidad. Se eliminan worker, selector de hilos, recarga para multihilo y harness de rendimiento CPU. No se distribuye el WASM de wllama; su CacheManager se conserva únicamente para detectar y desinstalar archivos GGUF. Las preferencias antiguas permanecen en los datos/copias sin controlar ningún motor.
 - Reconciliación: Qwen3 1.7B CPU, Qwen3 4B/8B GPU y Qwen3.5 0.8B/2B/4B CPU quedan en «Modelos retirados» sin borrar archivos. No pueden preparar, activar ni generar aunque antes estuvieran listos. Se pide desinstalarlos e instalar una variante vigente. Las claves separan CPU/GPU y la desinstalación CPU no modifica sus variantes GPU activas.
