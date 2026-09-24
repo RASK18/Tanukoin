@@ -22,6 +22,14 @@ Decisiones que se mantienen:
 - Búsqueda mediante Photon/OpenStreetMap y Wikipedia, con alternativa de búsqueda manual.
 - EUR como moneda inicial, importes enteros y monedas separadas. No se inventan horas en movimientos que solo incluyen fecha.
 
+## Recursos de marca
+
+`assets/marca/` conserva doce imágenes PNG aportadas por el usuario: nueve poses o retratos de Tanu, el logotipo horizontal, la moneda dorada y el logo con Tanu y moneda. Sus copias en `public/marca/` se sirven sin transformar; la igualdad se ha comprobado mediante SHA-256. Se elimina la antigua `public/tanu.webp` y se sustituyen todas sus referencias activas, incluido el README.
+
+El logotipo horizontal encabeza la barra lateral y el logo completo aparece durante la preparación inicial. Las poses decoran las cabeceras, la bienvenida y los estados vacíos; la cara sonriente se usa en el botón circular y la cabecera del chat. La moneda dorada es el favicon, el icono de Apple y el icono del manifiesto PWA, con su tamaño real de 1254 × 1254 y propósito `any`. Las doce imágenes se incluyen en la precaché; los PNG suman aproximadamente 11,2 MB. No se han alterado los archivos originales ni añadido dependencias.
+
+El cambio afecta únicamente a presentación y recursos: imágenes decorativas con texto alternativo vacío, tamaños adaptables, tarjeta de bienvenida sin solapamientos y distribución compacta de Categorías hasta 1000 px para mantener los controles dentro de pantalla. No modifica cálculos, eventos, persistencia, importación ni motores de IA. Validación: compilación con tipos, 15 pruebas existentes de navegador en Edge (importación, copias, categorías, teclado, chat, móvil y offline), comprobación de imágenes y ausencia de desbordamiento en once pantallas a 1512/768/390/320 px, capturas revisadas y carga de las doce imágenes tras recargar sin conexión. No se han ejecutado pruebas unitarias ni modelos reales para este cambio visual, ni comprobado la instalación nativa del icono PWA. Sin publicación.
+
 ## Base técnica y mapa del código
 
 React 19, TypeScript, Vite, Dexie/IndexedDB, vite-plugin-pwa/Workbox y rutas con hash. Papa Parse para CSV, SheetJS CE para Excel y PDF.js para PDF. Gráficos con Recharts y mapa con Leaflet. Los detalles de dependencias están en `package.json` y `pnpm-lock.yaml`.

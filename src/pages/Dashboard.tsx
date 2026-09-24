@@ -148,6 +148,7 @@ export function Dashboard({ onImport }: { onImport: () => void }) {
   return (
     <>
       <PageTitle
+        illustration="tanu-saludando"
         eyebrow="UN POCO DE CLARIDAD, CADA DÍA"
         title="Tu dinero, con perspectiva"
         description="Todo lo que necesitas saber. En un lugar que solo te pertenece."
@@ -254,15 +255,19 @@ export function Dashboard({ onImport }: { onImport: () => void }) {
                   Descubre tu IA local <ArrowRight size={15} />
                 </Link>
               </div>
-              <img
-                src={`${import.meta.env.BASE_URL}tanu.webp`}
-                alt="Tanu con su libreta"
-              />
-              <span className="ai-card-decoration">
-                Tu pequeño
-                <br />
-                aliado financiero
-              </span>
+              <div className="ai-card-art">
+                <img
+                  src={`${import.meta.env.BASE_URL}marca/tanu-presentando.png`}
+                  alt=""
+                  width="180"
+                  height="180"
+                />
+                <span className="ai-card-decoration">
+                  Tu pequeño
+                  <br />
+                  aliado financiero
+                </span>
+              </div>
             </section>
           )}
         </div>

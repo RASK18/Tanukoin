@@ -89,14 +89,20 @@ export function Tanu() {
         {open ? (
           <X size={23} />
         ) : (
-          <img src={`${import.meta.env.BASE_URL}tanu.webp`} alt="" />
+          <img
+            src={`${import.meta.env.BASE_URL}marca/tanu-cara-sonriente.png`}
+            alt=""
+          />
         )}
         {!open && <span>¿Te echo una mano?</span>}
       </button>
       {open && (
         <section className="tanu-chat" aria-label="Chat de Tanu">
           <header>
-            <img src={`${import.meta.env.BASE_URL}tanu.webp`} alt="" />
+            <img
+              src={`${import.meta.env.BASE_URL}marca/tanu-cara-sonriente.png`}
+              alt=""
+            />
             <div>
               <strong>Tanu {model && <i className="status-dot" />}</strong>
               <small>IA local · {status}</small>

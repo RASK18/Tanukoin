@@ -304,8 +304,9 @@ a svg {
 }
 .brand {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 9px;
+  gap: 0;
   margin-bottom: 30px;
   flex-shrink: 0;
   color: var(--ink);
@@ -314,17 +315,10 @@ a svg {
   text-decoration: none;
 }
 .brand img {
-  width: 40px;
-  height: 48px;
+  width: 180px;
+  max-width: 100%;
+  height: 60px;
   object-fit: contain;
-}
-.brand strong {
-  font-size: 25px;
-  letter-spacing: -1px;
-  font-weight: 750;
-}
-.brand-dot {
-  color: #8eac7e;
 }
 .brand small {
   display: block;
@@ -466,6 +460,23 @@ a svg {
   color: #8a9588;
   margin-top: 8px;
 }
+.page-title-intro {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+.page-title-intro > div {
+  min-width: 0;
+}
+.page-title-tanu {
+  width: 84px;
+  height: 84px;
+  flex-shrink: 0;
+  object-fit: contain;
+  background: radial-gradient(ellipse, #f6ead5 0%, #f6ead500 70%);
+  pointer-events: none;
+}
 .period-select {
   display: flex;
   align-items: center;
@@ -593,17 +604,12 @@ a svg {
   padding: 35px 22px;
   color: #8d9a87;
 }
-.empty-icon {
-  width: 50px;
-  height: 50px;
-  border: 1px solid #e7eddf;
-  background: #f5f8ef;
-  border-radius: 16px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: #9eaf8d;
+.empty-tanu {
+  width: 96px;
+  height: 96px;
+  object-fit: contain;
   margin-bottom: 14px;
+  pointer-events: none;
 }
 .empty h3 {
   color: #718367;
@@ -647,8 +653,7 @@ a svg {
   right: 7px;
   z-index: 3;
 }
-.welcome-grid .section-heading,
-.welcome-grid .ai-copy {
+.welcome-grid .section-heading {
   padding-right: 22px;
 }
 .welcome-grid.welcome-single {
@@ -662,9 +667,8 @@ a svg {
   .welcome-single .ai-copy p br {
     display: none;
   }
-  .welcome-single .ai-card > img {
-    height: 155px;
-    width: 155px;
+  .welcome-single .ai-card-art > img {
+    max-width: 130px;
   }
   .welcome-single .ai-card-decoration {
     display: none;
@@ -741,6 +745,10 @@ a svg {
   margin-top: 12px;
 }
 .ai-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(80px, 32%);
+  align-items: center;
+  gap: 12px;
   background: #ecf2e6;
   border: 1px solid #e0e9d7;
   border-radius: var(--radius);
@@ -778,21 +786,22 @@ a svg {
   font-size: 11px;
   color: #658552;
 }
-.ai-card > img {
-  position: absolute;
-  height: 197px;
-  width: 197px;
+.ai-card-art {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
+}
+.ai-card-art > img {
+  height: auto;
+  width: 100%;
+  max-width: 180px;
+  aspect-ratio: 1;
   object-fit: contain;
-  right: 1px;
-  bottom: -16px;
-  filter: saturate(0.8);
-  transform: rotate(-5deg);
 }
 .ai-card-decoration {
-  position: absolute;
-  right: 23px;
-  top: 30px;
-  transform: rotate(10deg);
+  text-align: center;
   font-family: Georgia, serif;
   font-style: italic;
   color: #92a37d;
@@ -1874,12 +1883,13 @@ tbody tr:hover {
   align-items: center;
   justify-content: center;
   color: #3c6539;
+  padding: 0;
 }
 .tanu-launcher > img {
-  width: 53px;
-  height: 57px;
+  width: 100%;
+  height: 100%;
+  padding: 3px;
   object-fit: contain;
-  margin-top: -3px;
 }
 .tanu-launcher > span {
   position: absolute;
@@ -2098,14 +2108,6 @@ tbody tr:hover {
   .welcome-grid {
     grid-template-columns: 1.25fr 1fr;
   }
-  .ai-card > img {
-    right: 35px;
-    height: 210px;
-    width: 210px;
-  }
-  .ai-card-decoration {
-    right: 42px;
-  }
   .metric {
     padding: 23px;
   }
@@ -2168,14 +2170,6 @@ tbody tr:hover {
   .ai-card {
     min-height: 175px;
   }
-  .ai-card > img {
-    height: 180px;
-    right: 55px;
-    bottom: -14px;
-  }
-  .ai-card-decoration {
-    right: 23px;
-  }
   .ai-copy p br {
     display: none;
   }
@@ -2225,6 +2219,13 @@ tbody tr:hover {
   }
 }
 @media (max-width: 760px) {
+  .page-title-intro {
+    gap: 10px;
+  }
+  .page-title-tanu {
+    width: 56px;
+    height: 56px;
+  }
   :root {
     font-size: 16px;
   }
@@ -2336,15 +2337,7 @@ tbody tr:hover {
     padding: 21px;
     min-height: 190px;
   }
-  .ai-card > img {
-    right: 1px;
-    width: 158px;
-    height: 171px;
-    bottom: -9px;
-  }
   .ai-card-decoration {
-    top: 20px;
-    right: 20px;
     font-size: 10px;
   }
   .ai-copy p {

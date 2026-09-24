@@ -191,9 +191,10 @@ export function App() {
     return (
       <main className="fatal">
         <img
-          src={`${import.meta.env.BASE_URL}tanu.webp`}
-          alt="Tanu"
-          width="100"
+          src={`${import.meta.env.BASE_URL}marca/tanukoin-logo-con-tanu-y-moneda.png`}
+          alt="Tanukoin"
+          width="180"
+          height="180"
         />
         <h1>Preparando tu espacio…</h1>
       </main>
@@ -218,13 +219,13 @@ export function App() {
       )}
       <aside id="app-sidebar" className={`sidebar ${sidebar ? "is-open" : ""}`}>
         <NavLink to="/" className="brand" onClick={() => setSidebar(false)}>
-          <img src={`${import.meta.env.BASE_URL}tanu.webp`} alt="" />
-          <span>
-            <strong>
-              Tanukoin<span className="brand-dot">.</span>
-            </strong>
-            <small>Tus finanzas, en tus manos</small>
-          </span>
+          <img
+            src={`${import.meta.env.BASE_URL}marca/tanukoin-logotipo-horizontal.png`}
+            alt="Tanukoin"
+            width="180"
+            height="60"
+          />
+          <small>Tus finanzas, en tus manos</small>
         </NavLink>
         <span className="nav-label">TU ESPACIO</span>
         <nav>

@@ -63,7 +63,10 @@ export function AIPage() {
                 <small>Tus consultas se procesan aquí.</small>
               </span>
             </div>
-            <img src={`${import.meta.env.BASE_URL}tanu.webp`} alt="" />
+            <img
+              src={`${import.meta.env.BASE_URL}marca/tanu-pulgar-arriba.png`}
+              alt=""
+            />
             <span className="ai-privacy-script">
               Tu privacidad
               <br />

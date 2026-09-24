@@ -4,7 +4,7 @@ Finanzas personales en español, en tu navegador. PWA estática sin backend, ana
 
 **Web:** https://disboard.es/Tanukoin/ · **Licencia:** [AGPL-3.0](LICENSE.md)
 
-![Tanu](public/tanu.webp)
+![Tanukoin](public/marca/tanukoin-logo-con-tanu-y-moneda.png)
 
 ## Funciones
 

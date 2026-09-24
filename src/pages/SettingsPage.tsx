@@ -47,6 +47,7 @@ export function SettingsPage() {
   return (
     <>
       <PageTitle
+        illustration="tanu-sentado-sonriendo"
         title="Tu espacio, tus decisiones"
         description="Controla qué se guarda y cuándo permites salir a internet."
       />

@@ -230,6 +230,7 @@ export function Movements({ onImport }: { onImport: () => void }) {
   return (
     <>
       <PageTitle
+        illustration="tanu-presentando"
         title="Tus movimientos"
         description="Encuentra, ordena y da contexto a cada pequeño movimiento."
         action={

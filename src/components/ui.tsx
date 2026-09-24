@@ -9,7 +9,7 @@ import {
   useId,
   type ReactNode,
 } from "react";
-import { X, Leaf } from "lucide-react";
+import { X } from "lucide-react";
 import type { Snapshot, Category } from "../data/types";
 import { emptySnapshot } from "../data/types";
 export const AppContext = createContext({
@@ -76,18 +76,32 @@ export function PageTitle({
   title,
   description,
   action,
+  illustration,
 }: {
   eyebrow?: string;
   title: string;
   description: string;
   action?: ReactNode;
+  illustration?: string;
 }) {
   return (
     <div className="page-title">
-      <div>
-        {eyebrow && <span className="eyebrow">{eyebrow}</span>}
-        <h1>{title}</h1>
-        <p>{description}</p>
+      <div className="page-title-intro">
+        {illustration && (
+          <img
+            className="page-title-tanu"
+            src={`${import.meta.env.BASE_URL}marca/${illustration}.png`}
+            alt=""
+            width="84"
+            height="84"
+            draggable={false}
+          />
+        )}
+        <div>
+          {eyebrow && <span className="eyebrow">{eyebrow}</span>}
+          <h1>{title}</h1>
+          <p>{description}</p>
+        </div>
       </div>
       {action}
     </div>
@@ -104,9 +118,15 @@ export function Empty({
 }) {
   return (
     <div className="empty">
-      <span className="empty-icon">
-        <Leaf size={25} />
-      </span>
+      <img
+        className="empty-tanu"
+        src={`${import.meta.env.BASE_URL}marca/tanu-sentado-sonriendo.png`}
+        alt=""
+        width="96"
+        height="96"
+        loading="lazy"
+        draggable={false}
+      />
       <h3>{title}</h3>
       <p>{children}</p>
       {action}

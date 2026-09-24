@@ -66,9 +66,7 @@ export default defineConfig({
       filename: "sw.ts",
       injectRegister: "auto",
       includeAssets: [
-        "tanu.webp",
-        "icon-192.png",
-        "icon-512.png",
+        "marca/*.png",
         "bank-callback.html",
         "bank-callback.js",
       ],
@@ -84,16 +82,10 @@ export default defineConfig({
         scope: "/Tanukoin/",
         icons: [
           {
-            src: "icon-192.png",
-            sizes: "192x192",
+            src: "marca/tanukoin-moneda-dorada.png",
+            sizes: "1254x1254",
             type: "image/png",
             purpose: "any",
-          },
-          {
-            src: "icon-512.png",
-            sizes: "512x512",
-            type: "image/png",
-            purpose: "any maskable",
           },
         ],
       },

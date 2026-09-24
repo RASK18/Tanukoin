@@ -47,6 +47,7 @@ export function Accounts() {
     <>
       <PageTitle
         title="Tus cuentas"
+        illustration="tanu-abrazando-moneda"
         description="Una vista conjunta, sin perder de vista de dónde viene cada movimiento."
         action={
           <button className="button primary" onClick={() => edit()}>
@@ -199,6 +200,7 @@ export function Rules() {
     <>
       <PageTitle
         title="Menos trabajo, más orden"
+        illustration="tanu-pulgar-arriba"
         description="Define una vez cómo organizar tus movimientos. Las reglas se aplican por prioridad."
         action={
           <div className="button-row">
@@ -600,6 +602,7 @@ export function Subscriptions() {
     <>
       <PageTitle
         title="Nada te pilla por sorpresa"
+        illustration="tanu-tumbado-sonriendo"
         description="Tus suscripciones y cargos fijos, con un poco de antelación."
         action={
           <button

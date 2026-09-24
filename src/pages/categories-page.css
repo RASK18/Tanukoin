@@ -226,7 +226,7 @@
   font-size: 12px;
   padding: 6px 12px;
 }
-@media (min-width: 761px) {
+@media (min-width: 1001px) {
   @container (max-width: 1000px) {
     .category-name-edit.has-changes {
       max-width: 280px;
@@ -414,7 +414,7 @@
     --category-columns: minmax(220px, 1fr) 65px 95px 170px;
   }
 }
-@media (max-width: 760px) {
+@media (max-width: 1000px) {
   .category-editor {
     --tree-indent: 20px;
     --category-columns: minmax(0, 1fr) 30px 36px;

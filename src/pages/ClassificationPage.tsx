@@ -21,6 +21,7 @@ export function TagsPage() {
   return (
     <>
       <PageTitle
+        illustration="tanu-saltando-de-alegria"
         title="Conecta tus movimientos"
         description="Las etiquetas agrupan movimientos de cualquier categoría: un viaje, una persona o un proyecto."
         action={

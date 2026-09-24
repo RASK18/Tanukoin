@@ -67,6 +67,7 @@ export function BankPage() {
   return (
     <>
       <PageTitle
+        illustration="tanu-abrazando-moneda"
         title="Tu banco, conectado contigo"
         description="Una conexión personal, con tus propias credenciales y sin servidor intermediario."
       />

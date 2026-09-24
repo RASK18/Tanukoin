@@ -479,6 +479,7 @@ export function Categories() {
   return (
     <>
       <PageTitle
+        illustration="tanu-presentando"
         title="Cada cosa en su lugar"
         description="Edita tus categorías aquí mismo. Arrastra el asa para ordenar o cambiar de rama."
         action={

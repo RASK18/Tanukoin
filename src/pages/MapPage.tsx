@@ -230,6 +230,7 @@ export function MapPage() {
   return (
     <>
       <PageTitle
+        illustration="tanu-asomado-al-borde"
         title="Cada movimiento tiene una historia"
         description="Encuentra dónde pudo ocurrir un cargo, sin compartir tu historial."
         action={
