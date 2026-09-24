@@ -214,6 +214,11 @@ export function buildCandidates(
         createdAt: new Date().toISOString(),
       };
       validateOriginalAmount(m);
+      if (cell(c.balanceSource)) {
+        if (cell(c.balanceSource) !== "Calculado" || m.balance === undefined)
+          throw new Error("Origen del saldo no válido");
+        m.balanceSource = "calculated";
+      }
       validateMovementCosts(m);
       m.fingerprint = fingerprint(m);
       const sourceDates = [
@@ -262,13 +267,18 @@ export function duplicateChecker(existing: Movement[]) {
     const matches = byContent.get(fingerprint(m)) || [];
     if (
       m.balance !== undefined &&
-      matches.some((old) => old.balance === m.balance)
+      !m.balanceSource &&
+      matches.some((old) => !old.balanceSource && old.balance === m.balance)
     )
       return { duplicate: "possible", selected: false };
     // Older imports may lack a balance. Flag the uncertainty without dropping a row.
     if (
       matches.some(
-        (old) => old.balance === undefined || m.balance === undefined,
+        (old) =>
+          old.balance === undefined ||
+          m.balance === undefined ||
+          !!old.balanceSource ||
+          !!m.balanceSource,
       )
     )
       return { duplicate: "possible", selected: true, balanceMissing: true };

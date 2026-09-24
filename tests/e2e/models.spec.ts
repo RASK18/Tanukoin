@@ -36,6 +36,10 @@ test("embeddings reales: descarga, arranque frío offline y búsqueda semántica
   await page.getByRole("button", { name: "Guardar cuenta" }).click();
   await page.goto("#/movimientos");
   await page.getByRole("button", { name: "Importar", exact: true }).click();
+  await page
+    .getByRole("dialog", { name: "Importar movimientos", exact: true })
+    .getByRole("combobox", { name: "Cuenta", exact: true })
+    .selectOption({ index: 1 });
   await page.getByLabel("Archivo bancario").setInputFiles({
     name: "ejemplo.csv",
     mimeType: "text/csv",
@@ -44,6 +48,10 @@ test("embeddings reales: descarga, arranque frío offline y búsqueda semántica
     ),
   });
   await page.getByRole("button", { name: "Revisar movimientos" }).click();
+  const opening = page.getByLabel("Saldo antes del primer movimiento", {
+    exact: true,
+  });
+  if (await opening.count()) await opening.fill("0");
   await page.getByRole("button", { name: "Importar 2 movimientos" }).click();
   await expect(
     page.getByText("Compra supermercado", { exact: true }),

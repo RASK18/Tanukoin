@@ -175,6 +175,9 @@ it.each([
   ["Comisión: 0,50 GBP"],
   ["Comisión: desconocida"],
   ["Tipo de cambio: imposible"],
+  [
+    "Tipo de cambio de Revolut: 1,00€ = 150¥ (tipo de cambio de ECB*: 1,00€ = 151¥)",
+  ],
   ["Tipo de cambio: 0,85", "Tipo de cambio: 0,90"],
 ])("PDF conserva metadatos ambiguos en notas y avisa: %s", (...details) => {
   const result = pdf(details);

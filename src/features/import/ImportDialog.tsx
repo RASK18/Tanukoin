@@ -13,21 +13,20 @@ import {
 } from "lucide-react";
 import { db } from "../../data/db";
 import type { Movement } from "../../data/types";
-import {
-  applyRules,
-  money,
-  fingerprint,
-  parseAmount,
-  parseDate,
-  validateMovementDates,
-} from "../../lib/finance";
+import { applyRules, money, fingerprint } from "../../lib/finance";
 import { useApp, Modal, Field, AccountSelect } from "../../components/ui";
 import { buildCandidates, duplicateChecker } from "./parse";
 import { prepareImport } from "./prepare";
 import { parsePageRanges } from "./page-ranges";
 import { AccountDialog } from "../../components/AccountDialog";
-import { sanitizeMovementText } from "../../lib/movement-text";
 import {
+  calculateReviewBalances,
+  resolveReviewedCandidate,
+  refreshReviewNotes,
+} from "./review";
+import { ReviewTable } from "./ReviewTable";
+import {
+  orderMovements,
   inferSourceOrder,
   reconcileMovementOrder,
   orderWarning,
@@ -37,7 +36,12 @@ import {
   detectionPrompt,
   validateDetectedLayout,
 } from "./detect";
-import type { Candidate, ParsedFile, DetectedLayout } from "./types";
+import type {
+  Candidate,
+  ParsedFile,
+  DetectedLayout,
+  ReviewField,
+} from "./types";
 
 export function ImportDialog({
   onClose,
@@ -53,7 +57,8 @@ export function ImportDialog({
   const [pageMode, setPageMode] = useState<"all" | "ranges">("all");
   const [pageRanges, setPageRanges] = useState("");
   const [previewSheet, setPreviewSheet] = useState(0);
-  const [account, setAccount] = useState(data.accounts[0]?.id || "");
+  const [account, setAccount] = useState("");
+  const [openingBalance, setOpeningBalance] = useState("");
   const [creatingAccount, setCreatingAccount] = useState(false);
   const [overrides, setOverrides] = useState<Record<number, DetectedLayout>>(
     {},
@@ -99,7 +104,7 @@ export function ImportDialog({
     [review, setReview] = useState(!!initial),
     [progress, setProgress] = useState(0),
     [previewPage, setPreviewPage] = useState(0);
-  const [editErrors, setEditErrors] = useState<Record<number, string>>({});
+  const [editErrors, setEditErrors] = useState<Record<string, string>>({});
   const worker = useRef<Worker | null>(null);
   useEffect(
     () => () => {
@@ -110,6 +115,8 @@ export function ImportDialog({
   );
   function read(selected: File) {
     const current = ++generation.current;
+    if (!account) return;
+    setOpeningBalance("");
     setDetection("");
     setEditErrors({});
     setFile(selected);
@@ -199,6 +206,35 @@ export function ImportDialog({
     [parsed, previewAccount, previewSheet, overrides, data.movements, prepared],
   );
   const issues = review ? errors : [...errors, ...(prepared?.errors || [])];
+  const reviewWarnings = (prepared?.warnings || []).filter((warning) => {
+    const related = candidates.flatMap((c) =>
+      (c.issues || []).filter(
+        (issue) => warning === `${c.sheet}: ${issue.message}`,
+      ),
+    );
+    return !related.length || related.some((issue) => !issue.resolved);
+  });
+  const needsBalances =
+    review && !!parsed && candidates.length > 0 && !prepared?.hasSourceBalances;
+  const reviewed = useMemo(() => {
+    let rows = candidates,
+      error = "";
+    if (needsBalances) {
+      try {
+        rows = calculateReviewBalances(candidates, openingBalance);
+      } catch (e) {
+        error = e instanceof Error ? e.message : "Saldo no válido";
+      }
+    }
+    const byId = new Map(rows.map((c) => [c.movement.id, c]));
+    return {
+      rows: orderMovements(rows.map((c) => c.movement)).map((m) => ({
+        ...byId.get(m.id)!,
+        movement: applyRules(m, data.rules),
+      })),
+      error,
+    };
+  }, [candidates, needsBalances, openingBalance, data.rules]);
   const orderPreview = useMemo(() => {
     const rows = review ? candidates : prepared?.candidates || [];
     const source = inferSourceOrder(
@@ -281,7 +317,13 @@ export function ImportDialog({
     }
   }
   async function save() {
-    if (savingRef.current) return;
+    if (
+      savingRef.current ||
+      reviewed.error ||
+      Object.keys(editErrors).length ||
+      !candidates.some((c) => c.selected)
+    )
+      return;
     savingRef.current = true;
     setSaveFailed(false);
     setLoading(true);
@@ -292,13 +334,13 @@ export function ImportDialog({
       (async () => {
         await new Promise((resolve) => setTimeout(resolve, 0));
         const source = inferSourceOrder(
-          candidates.map((c) => c.movement),
+          reviewed.rows.map((c) => c.movement),
           new Set(
             candidates.filter((c) => c.orderEdited).map((c) => c.movement.id),
           ),
         );
         const inferred = new Map(source.map((m) => [m.id, m]));
-        const selected = candidates.filter((c) => c.selected);
+        const selected = reviewed.rows.filter((c) => c.selected);
         let prepared: Movement[] = [];
         for (let i = 0; i < selected.length; i += 250) {
           prepared.push(
@@ -394,49 +436,48 @@ export function ImportDialog({
       onClose();
     }
   }
-  function editCandidate(
-    index: number,
-    key: "date" | "amount" | "description",
-    value: string,
-  ) {
+  function editCandidate(id: string, key: ReviewField, value: string) {
+    const index = candidates.findIndex((c) => c.movement.id === id);
+    const candidate = candidates[index];
+    if (!candidate) return;
+    const edits = { ...candidate.edits, [key]: value };
+    const next = [...candidates];
     try {
-      const next = [...candidates];
-      const movement = { ...next[index].movement };
-      if (key === "amount")
-        movement.amount = parseAmount(value, ",", movement.currency);
-      else if (key === "date") {
-        movement.date = parseDate(value, "YMD");
-      } else {
-        if (!value.trim()) throw new Error("Falta el concepto");
-        movement.description = value;
-      }
-      validateMovementDates(movement);
-      Object.assign(movement, sanitizeMovementText(movement));
-      movement.fingerprint = fingerprint(movement);
+      const resolved = resolveReviewedCandidate(candidate, edits);
+      const movement = resolved.movement;
       next[index] = {
-        ...next[index],
+        ...resolved,
         orderEdited:
-          next[index].orderEdited ||
-          movement.amount !== next[index].movement.amount,
-        movement,
-        ...(fingerprint(next[index].movement) !== movement.fingerprint
+          candidate.orderEdited ||
+          movement.amount !== candidate.movement.amount ||
+          movement.balance !== candidate.movement.balance,
+        ...(fingerprint(movement) !== fingerprint(candidate.movement) ||
+        movement.balance !== candidate.movement.balance
           ? {
               balanceMissing: false,
               ...duplicateChecker(data.movements)(movement),
             }
           : {}),
       };
-      setCandidates(next);
-      setEditErrors((errors) => {
-        const copy = { ...errors };
-        delete copy[index];
-        return copy;
+      setEditErrors((current) => {
+        const next = { ...current };
+        delete next[id];
+        return next;
       });
     } catch (e) {
-      const message = e instanceof Error ? e.message : "Dato inválido";
-      setEditErrors((errors) => ({ ...errors, [index]: message }));
-      notify(message);
+      next[index] = refreshReviewNotes({
+        ...candidate,
+        edits,
+        issues: candidate.issues?.map((issue) =>
+          issue.fields.includes(key) ? { ...issue, resolved: false } : issue,
+        ),
+      });
+      setEditErrors((current) => ({
+        ...current,
+        [id]: e instanceof Error ? e.message : "Dato no válido",
+      }));
     }
+    setCandidates(next);
   }
   return (
     <Modal
@@ -448,7 +489,7 @@ export function ImportDialog({
     >
       <div className="steps">
         <span className={!review && !saving ? "active" : ""}>
-          1. Archivo y vista previa
+          1. Cuenta, archivo y vista previa
         </span>
         <ArrowRight size={15} />
         <span className={review && !saving ? "active" : ""}>
@@ -459,52 +500,14 @@ export function ImportDialog({
       </div>
       {!review && !saving && (
         <>
-          <label
-            className={`dropzone${dragging ? " dragging" : ""}${file ? " has-file" : ""}`}
-            onDragOver={(e) => {
-              e.preventDefault();
-              e.dataTransfer.dropEffect = "copy";
-              setDragging(true);
-            }}
-            onDragLeave={(e) => {
-              if (!e.currentTarget.contains(e.relatedTarget as Node))
-                setDragging(false);
-            }}
-            onDrop={(e) => {
-              e.preventDefault();
-              setDragging(false);
-              if (e.dataTransfer.files.length !== 1) {
-                notify("Suelta un solo archivo cada vez.");
-                return;
-              }
-              read(e.dataTransfer.files[0]);
-            }}
-          >
-            <Upload size={28} />
-            <strong>
-              {file?.name ||
-                "Arrastra aquí tu extracto o haz clic para elegirlo"}
-            </strong>
-            <span>
-              CSV, Excel o PDF con texto · Máximo 100 MB · Tu archivo no se sube
-            </span>
-            <input
-              aria-label="Archivo bancario"
-              type="file"
-              accept=".csv,.tsv,.xls,.xlsx,.pdf"
-              onChange={(e) => {
-                if (e.target.files?.[0]) read(e.target.files[0]);
-              }}
-            />
-            <span className="file-choice" aria-hidden="true">
-              {file ? "Cambiar archivo" : "Elegir archivo"}
-            </span>
-          </label>
           <div className="import-account-row">
             <Field label="Cuenta de destino">
               <AccountSelect
                 value={account}
-                onChange={setAccount}
+                onChange={(id) => {
+                  setAccount(id);
+                  setOpeningBalance("");
+                }}
                 data={data}
               />
             </Field>
@@ -518,15 +521,61 @@ export function ImportDialog({
           </div>
           {!data.accounts.length && (
             <p className="muted">
-              Crea una cuenta aquí para guardar los movimientos. El archivo
-              elegido se conservará.
+              Elige o crea una cuenta para poder seleccionar el archivo.
             </p>
+          )}
+          {target && (
+            <label
+              className={`dropzone${dragging ? " dragging" : ""}${file ? " has-file" : ""}`}
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "copy";
+                setDragging(true);
+              }}
+              onDragLeave={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node))
+                  setDragging(false);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragging(false);
+                if (e.dataTransfer.files.length !== 1) {
+                  notify("Suelta un solo archivo cada vez.");
+                  return;
+                }
+                read(e.dataTransfer.files[0]);
+              }}
+            >
+              <Upload size={28} />
+              <strong>
+                {file?.name ||
+                  "Arrastra aquí tu extracto o haz clic para elegirlo"}
+              </strong>
+              <span>
+                CSV, Excel o PDF con texto · Máximo 100 MB · Tu archivo no se
+                sube
+              </span>
+              <input
+                aria-label="Archivo bancario"
+                type="file"
+                accept=".csv,.tsv,.xls,.xlsx,.pdf"
+                onChange={(e) => {
+                  if (e.target.files?.[0]) read(e.target.files[0]);
+                }}
+              />
+              <span className="file-choice" aria-hidden="true">
+                {file ? "Cambiar archivo" : "Elegir archivo"}
+              </span>
+            </label>
           )}
           {parsed && (
             <>
               {parsed.kind === "pdf" ? (
-                <fieldset className="pdf-page-selection">
-                  <legend>Páginas que se importarán</legend>
+                <div
+                  className="pdf-page-selection"
+                  role="group"
+                  aria-label="Páginas que se importarán"
+                >
                   <div className="button-row">
                     <label>
                       <input
@@ -548,20 +597,22 @@ export function ImportDialog({
                     </label>
                   </div>
                   {pageMode === "ranges" && (
-                    <Field label="Páginas">
+                    <>
                       <input
+                        aria-label="Páginas"
+                        type="text"
+                        className="pdf-page-ranges"
                         value={pageRanges}
                         onChange={(e) => setPageRanges(e.target.value)}
                         placeholder="1-8, 12, 20-29"
                         aria-invalid={!!pageSelection.error}
                         aria-describedby="pdf-range-help pdf-range-error"
                       />
-                    </Field>
+                    </>
                   )}
                   {pageMode === "ranges" && (
                     <p id="pdf-range-help" className="muted">
-                      Por ejemplo: 1-29 para importar hasta la página 29, o 1-8,
-                      12, 20-29 para combinar rangos.
+                      Ej.: 1-8, 12, 20-29
                     </p>
                   )}
                   <p
@@ -573,13 +624,12 @@ export function ImportDialog({
                   {!pageSelection.error && (
                     <p role="status">
                       {pageSelection.indices.length} de {parsed.sheets.length}{" "}
-                      páginas seleccionadas · {prepared?.candidates.length || 0}{" "}
-                      movimientos
+                      páginas seleccionadas
                       {!!prepared?.informational &&
                         ` · ${prepared.informational} páginas informativas sin movimientos`}
                     </p>
                   )}
-                </fieldset>
+                </div>
               ) : (
                 parsed.sheets.length > 1 && (
                   <Field label="Hoja">
@@ -623,19 +673,12 @@ export function ImportDialog({
                   {detection}
                 </p>
               )}
-              {!prepared?.errors.length &&
-                !pageSelection.error &&
-                !!prepared?.candidates.length && (
-                  <p className="muted">
-                    Archivo reconocido en tu dispositivo. No necesitas descargar
-                    modelos para importarlo.
-                  </p>
-                )}
               <div className="import-preview-heading">
                 <h3>Vista previa</h3>
                 {parsed.kind === "pdf" && (
-                  <Field label="Vista previa de página">
+                  <div className="field">
                     <select
+                      aria-label="Vista previa de página"
                       value={previewSheet}
                       onChange={(e) => setPreviewSheet(Number(e.target.value))}
                     >
@@ -645,7 +688,7 @@ export function ImportDialog({
                         </option>
                       ))}
                     </select>
-                  </Field>
+                  </div>
                 )}
               </div>
               {shown?.informational ? (
@@ -846,131 +889,49 @@ export function ImportDialog({
               <strong>{candidates.filter((c) => !c.selected).length}</strong>{" "}
               descartados
             </span>
+            <button
+              className="button primary import-review-submit"
+              disabled={
+                loading ||
+                Object.keys(editErrors).length > 0 ||
+                !!reviewed.error ||
+                !candidates.some((c) => c.selected)
+              }
+              onClick={save}
+            >
+              <Check size={17} /> Importar{" "}
+              {candidates.filter((c) => c.selected).length} movimientos
+            </button>
           </div>
-          <p className="muted">
-            Solo comparamos con movimientos ya guardados en esta cuenta: fecha,
-            importe, concepto y saldo. Las repeticiones dentro del archivo se
-            conservan. Si falta el saldo en alguno de los dos, la coincidencia
-            queda seleccionada para que la revises.
-          </p>
-          <div className="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>Incluir</th>
-                  <th>Fecha principal</th>
-                  <th>Concepto</th>
-                  <th>Importe</th>
-                  <th>Saldo</th>
-                  <th>Estado</th>
-                </tr>
-              </thead>
-              <tbody>
-                {candidates
-                  .slice(previewPage * 50, previewPage * 50 + 50)
-                  .map((c, offset) => {
-                    const i = previewPage * 50 + offset;
-                    return (
-                      <tr key={c.movement.id}>
-                        <td>
-                          <input
-                            aria-label={`Incluir fila ${c.row}${c.page ? ` de la página ${c.page}` : ""}`}
-                            type="checkbox"
-                            checked={c.selected}
-                            onChange={(e) =>
-                              setCandidates(
-                                candidates.map((r, j) =>
-                                  j === i
-                                    ? { ...r, selected: e.target.checked }
-                                    : r,
-                                ),
-                              )
-                            }
-                          />
-                          {c.page && <small>Pág. {c.page}</small>}
-                        </td>
-                        <td>
-                          <input
-                            aria-label={`Fecha fila ${c.row}`}
-                            type="date"
-                            defaultValue={c.movement.date}
-                            onBlur={(e) =>
-                              editCandidate(i, "date", e.target.value)
-                            }
-                          />
-                          {c.movement.time && (
-                            <small>Hora: {c.movement.time}</small>
-                          )}
-                          {c.movement.secondaryDate && (
-                            <small>
-                              Secundaria: {c.movement.secondaryDate}
-                              {c.movement.secondaryTime
-                                ? ` · ${c.movement.secondaryTime}`
-                                : ""}
-                            </small>
-                          )}
-                        </td>
-                        <td>
-                          <input
-                            aria-label={`Concepto fila ${c.row}`}
-                            defaultValue={c.movement.description}
-                            onBlur={(e) =>
-                              editCandidate(i, "description", e.target.value)
-                            }
-                          />
-                        </td>
-                        <td>
-                          <input
-                            className="amount-input"
-                            aria-label={`Importe fila ${c.row}`}
-                            defaultValue={money(
-                              c.movement.amount,
-                              c.movement.currency,
-                            ).replace(/[^\d,.-]/g, "")}
-                            onBlur={(e) =>
-                              editCandidate(i, "amount", e.target.value)
-                            }
-                          />
-                          {c.movement.fee !== undefined && (
-                            <small>
-                              Comisión:{" "}
-                              {money(c.movement.fee, c.movement.currency)}
-                            </small>
-                          )}
-                          {c.movement.exchangeRate && (
-                            <small>
-                              Tipo de cambio aplicado: {c.movement.exchangeRate}
-                            </small>
-                          )}
-                          {c.movement.originalAmount !== undefined &&
-                            c.movement.originalCurrency && (
-                              <small>
-                                Original:{" "}
-                                {money(
-                                  c.movement.originalAmount,
-                                  c.movement.originalCurrency,
-                                )}
-                              </small>
-                            )}
-                        </td>
-                        <td>
-                          {c.movement.balance === undefined
-                            ? "—"
-                            : money(c.movement.balance, c.movement.currency)}
-                        </td>
-                        <td>
-                          {c.duplicate === "possible"
-                            ? c.balanceMissing
-                              ? "Revisar coincidencia: falta saldo"
-                              : "Posible duplicado"
-                            : "Nuevo"}
-                        </td>
-                      </tr>
-                    );
-                  })}
-              </tbody>
-            </table>
-          </div>
+          {!!reviewWarnings.length && (
+            <details className="notice warning">
+              <summary>{reviewWarnings.length} avisos del archivo</summary>
+              <ul>
+                {reviewWarnings.map((w, i) => (
+                  <li key={i}>{w}</li>
+                ))}
+              </ul>
+            </details>
+          )}
+          <ReviewTable
+            candidates={reviewed.rows.slice(
+              previewPage * 50,
+              previewPage * 50 + 50,
+            )}
+            onEdit={editCandidate}
+            onSelect={(id, selected) =>
+              setCandidates((rows) =>
+                rows.map((c) =>
+                  c.movement.id === id ? { ...c, selected } : c,
+                ),
+              )
+            }
+            opening={openingBalance}
+            onOpening={setOpeningBalance}
+            calculate={needsBalances}
+            balanceError={reviewed.error}
+            errors={editErrors}
+          />
           <div className="pagination">
             <button
               disabled={previewPage === 0}
@@ -1007,18 +968,6 @@ export function ImportDialog({
                 Volver a vista previa
               </button>
             )}
-            <button
-              className="button primary"
-              disabled={
-                loading ||
-                Object.keys(editErrors).length > 0 ||
-                !candidates.some((c) => c.selected)
-              }
-              onClick={save}
-            >
-              <Check size={17} /> Importar{" "}
-              {candidates.filter((c) => c.selected).length} movimientos
-            </button>
           </div>
         </>
       )}

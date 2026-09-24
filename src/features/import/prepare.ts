@@ -48,6 +48,7 @@ export function prepareImport(
     candidates.push(
       ...result.candidates.map((c, i) => ({
         ...c,
+        issues: sheet.issues?.filter((issue) => issue.row === c.row),
         movement: {
           ...c.movement,
           sourcePosition: {
@@ -89,6 +90,15 @@ export function prepareImport(
     new Map(candidates.map((c) => [c.movement.id, c.sourceDates || []])),
   );
   return {
+    hasSourceBalances: file.sheets.some((s, i) => {
+      const layout =
+        overrides[i] || detectImport({ ...file, sheets: [s] }).layout;
+      const col = layout.columns.balance ?? -1;
+      return (
+        col >= 0 &&
+        s.rows.slice(layout.headerRow + 1).some((row) => !!row[col]?.trim())
+      );
+    }),
     candidates: candidates.map((c, i) => ({ ...c, movement: ordered[i] })),
     errors,
     warnings,

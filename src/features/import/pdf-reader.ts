@@ -10,7 +10,7 @@ import {
   statementRows,
   type PdfText,
 } from "./pdf-table";
-import type { Sheet } from "./types";
+import type { Sheet, ReviewField } from "./types";
 import { normalizeImportedText, removeIbans } from "../../lib/movement-text";
 
 const headers = [
@@ -132,9 +132,22 @@ function separateCosts(
   currency: string | undefined,
   decimal: "," | ".",
   warnings: string[],
+  issue: (
+    fields: ReviewField[],
+    message: string,
+    noteFragments?: string[],
+  ) => void,
 ) {
   let fee = "",
     exchangeRate = "";
+  const warn = (
+    fields: ReviewField[],
+    message: string,
+    noteFragments: string[],
+  ) => {
+    warnings.push(message);
+    issue(fields, message, noteFragments);
+  };
   const commissions = [
     ...notes.matchAll(
       /Comisi[oó]n(?: incluida)?\s*:\s*([+-]?\d[\d.,]*)\s*(€|£|[A-Z]{3})(?![a-z])/gi,
@@ -164,12 +177,20 @@ function separateCosts(
         .replace(".", decimal);
       for (const match of commissions) notes = notes.replace(match[0], "");
     } catch {
-      warnings.push(
+      warn(
+        ["fee"],
         "No se ha podido separar la comisión o su moneda no coincide; se conserva en las notas.",
+        commissions.map((match) => match[0]),
       );
     }
   } else if (/Comisi[oó]n(?: incluida)?\s*:/i.test(notes)) {
-    warnings.push("Comisión no reconocida; se conserva en las notas.");
+    warn(
+      ["fee"],
+      "Comisión no reconocida; se conserva en las notas.",
+      notes
+        .split("\n")
+        .filter((line) => /^Comisi[oó]n(?: incluida)?\s*:/i.test(line.trim())),
+    );
   }
   // Exclude the parenthesized ECB comparison; only the bank's applied quote is used.
   const rates = [
@@ -186,8 +207,10 @@ function separateCosts(
       exchangeRate = values[0];
       for (const match of rates) notes = notes.replace(match[0], "");
     } catch {
-      warnings.push(
+      warn(
+        ["exchangeRate"],
         "Tipo de cambio aplicado no reconocido o ambiguo; se conserva en las notas.",
+        rates.map((match) => match[0].trim()),
       );
     }
   }
@@ -204,7 +227,13 @@ export function readPdfPage(
   page: number,
   context: PdfContext,
 ): Sheet {
-  const sheet: Sheet = { name: `Página ${page}`, page, rows: [], warnings: [] };
+  const sheet: Sheet = {
+    name: `Página ${page}`,
+    page,
+    rows: [],
+    warnings: [],
+    issues: [],
+  };
   const named = (text: string) => items.find((i) => normalize(i.text) === text);
   const description = named("descripcion") || named("concepto");
   const currency =
@@ -286,6 +315,17 @@ export function readPdfPage(
       : Infinity;
     sheet.rows = [headers];
     dates.forEach((date, index) => {
+      const issue = (
+        fields: ReviewField[],
+        message: string,
+        noteFragments?: string[],
+      ) =>
+        sheet.issues!.push({
+          row: sheet.rows.length + 1,
+          fields,
+          message,
+          noteFragments,
+        });
       const sameLine = (left: number, right: number) =>
         join(
           items.filter(
@@ -414,8 +454,19 @@ export function readPdfPage(
           const decimal = /,\d{1,2}\s*(?:€|[A-Z]{3})?$/.test(signed)
             ? ","
             : ".";
+          // A conversion destination explicitly names the foreign currency.
+          // Never infer $/¥ from other rows, a merchant, or an exchange rate.
+          const destination = revolut
+            ? /^conversion a (jpy|usd)$/.exec(normalize(concept))?.[1]
+            : undefined;
+          const explicitOriginal =
+            destination === "jpy" && rowCurrency !== "JPY"
+              ? originalText.replace(/¥/g, " JPY")
+              : destination === "usd" && rowCurrency !== "USD"
+                ? originalText.replace(/\$/g, " USD")
+                : originalText;
           original = originalMoney(
-            originalText,
+            explicitOriginal,
             rowCurrency,
             decimal,
             n26 ? "." : decimal,
@@ -423,10 +474,13 @@ export function readPdfPage(
         } catch {
           /* Preserve the source in notes and report it for review. */
         }
-        if (!original)
-          sheet.warnings!.push(
-            `Operación ${index + 1}: no se ha podido separar el importe y la moneda originales; se conservan en las notas.`,
-          );
+        if (!original) {
+          const message = `Operación ${index + 1}: no se ha podido separar el importe y la moneda originales; se conservan en las notas.`;
+          sheet.warnings!.push(message);
+          issue(["originalAmount", "originalCurrency"], message, [
+            revolut ? `Información original: ${originalText}` : originalText,
+          ]);
+        }
       }
       const party = revolut
         ? notes
@@ -439,6 +493,7 @@ export function readPdfPage(
         rowCurrency,
         /,\d{1,3}\s*(?:€|[A-Z]{3})?$/.test(signed) ? "," : ".",
         sheet.warnings!,
+        issue,
       );
       const text = normalizeImportedText({
         description: concept,

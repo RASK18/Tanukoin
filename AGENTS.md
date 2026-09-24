@@ -36,14 +36,16 @@
 ## Importación y duplicados
 
 - La zona de archivo admite arrastrar y soltar, selección por clic y teclado.
-- Muestra cuenta de destino, «Crear cuenta» y vista previa normalizada. La detección es automática, sin perfiles guardados ni ajustes manuales de columnas y formatos.
+- Exige elegir o crear la cuenta antes de mostrar la zona de archivo; después de cargarlo, contrae esa zona. Muestra cuenta de destino, «Crear cuenta» y vista previa normalizada. La detección es automática, sin perfiles guardados ni ajustes manuales de columnas y formatos.
+- La revisión muestra todos los campos bancarios. Solo permite editar campos con avisos o ambigüedad; marca la fila en amarillo y destaca el campo afectado, con texto accesible además del color.
+- Solo en archivos sin ningún saldo, exige un saldo previo explícito y calcula los totales en unidades enteras siguiendo la secuencia revisada, incluidas filas desmarcadas. No asumas cero ni rellenes saldos parciales. Identifica y conserva su procedencia calculada; no los uses como evidencia bancaria para ordenar, enlazar o descartar duplicados.
 - La selección de páginas PDF usa «Todas las páginas» o rangos escritos como `1-29, 35, 40-50`, nunca una lista de checks individuales. La navegación de la vista previa es independiente.
 - Detecta columnas y formatos localmente, sin necesitar modelos. Para casos no reconocidos, ofrece IA local preparada solo a petición expresa del usuario y valida su salida. No descargues modelos automáticamente ni añadas IA remota como alternativa.
 - Prioriza la contraparte explícita del origen; si solo aparece en el concepto, extráela con reglas locales para estructuras reconocibles y deja vacío lo ambiguo. Añade la referencia del pago al concepto con «. », evitando repetirla o confundirla con el nombre.
 - Conserva la secuencia del extracto por cuenta y moneda, también entre fechas distintas. Usa las columnas originales y los saldos contiguos para reconocer su sentido; conserva o invierte la secuencia completa, sin ordenar filas por la fecha principal. La falta de horas o saldos no es por sí sola una incidencia de orden. Avisa de evidencias contradictorias o enlaces ambiguos entre archivos. Editar fechas u horas no cambia la posición original.
 - Compara duplicados solo con movimientos ya guardados en la misma cuenta, nunca entre filas o páginas del archivo que se está importando.
 - La comparación por contenido considera fecha, importe, concepto y saldo. Saldos distintos distinguen operaciones legítimas repetidas.
-- Si falta el saldo en cualquiera de las partes, muestra la incertidumbre y conserva la fila seleccionada para revisión. No inventes saldos históricos.
+- Si falta el saldo en cualquiera de las partes, muestra la incertidumbre y conserva la fila seleccionada para revisión. No inventes saldos históricos ni trates los totales calculados como saldos bancarios.
 - Los movimientos no guardan identificadores bancarios externos. Duplicados y enlaces entre importaciones se comparan por contenido; los enlaces de orden exigen una coincidencia única con saldo presente e igual. Consulta `docs/contexto.md` para los detalles implementados.
 
 ## Desarrollo y validación

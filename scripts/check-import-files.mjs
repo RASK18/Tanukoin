@@ -134,6 +134,11 @@ try {
       await expect(review).toBeEnabled({ timeout: 60000 });
       stage = "revisión";
       await review.click();
+      // Test-only starting total: never infer a real opening balance from this check.
+      const opening = page.getByLabel("Saldo antes del primer movimiento", {
+        exact: true,
+      });
+      if (await opening.count()) await opening.fill("0");
       const save = page.getByRole("button", {
         name: /^Importar \d+ movimientos$/,
       });

@@ -179,6 +179,7 @@ export function Movements({ onImport }: { onImport: () => void }) {
         "Hora secundaria",
         "Comisión",
         "Tipo de cambio aplicado",
+        "Origen del saldo",
       ],
       ...rows.map((m) => [
         m.date,
@@ -215,6 +216,7 @@ export function Movements({ onImport }: { onImport: () => void }) {
               .toFixed(currencyDigits(m.currency))
               .replace(".", ","),
         m.exchangeRate || "",
+        m.balanceSource === "calculated" ? "Calculado" : "",
       ]),
     ]
       .map((row) => row.map(csvCell).join(";"))
@@ -465,7 +467,7 @@ export function Movements({ onImport }: { onImport: () => void }) {
                     <th className="align-right">Importe</th>
                     <th
                       className="align-right"
-                      title="Saldo de la cuenta tras este movimiento, según el archivo importado"
+                      title="Saldo tras el movimiento. Se indica cuando es calculado en lugar de proceder del extracto."
                     >
                       Saldo
                     </th>
@@ -555,7 +557,12 @@ export function Movements({ onImport }: { onImport: () => void }) {
                         {m.balance === undefined ? (
                           <span aria-label="Saldo no disponible">—</span>
                         ) : (
-                          money(m.balance, m.currency)
+                          <>
+                            {money(m.balance, m.currency)}
+                            {m.balanceSource === "calculated" && (
+                              <small>Calculado</small>
+                            )}
+                          </>
                         )}
                       </td>
                       <td>

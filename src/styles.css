@@ -1,4 +1,174 @@
 @import url("./theme.css");
+.import-review table {
+  min-width: 0;
+  table-layout: fixed;
+}
+.import-review th:nth-child(1) {
+  width: 6%;
+}
+.import-review th:nth-child(2) {
+  width: 18%;
+}
+.import-review th:nth-child(3) {
+  width: 23%;
+}
+.import-review th:nth-child(4) {
+  width: 22%;
+}
+.import-review th:nth-child(5) {
+  width: 12%;
+}
+.import-review th:nth-child(6) {
+  width: 19%;
+}
+.import-review th,
+.import-review td {
+  padding-left: 0.65rem;
+  padding-right: 0.65rem;
+  overflow-wrap: anywhere;
+}
+.import-review td[data-label="Estado"] ul {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0 0;
+}
+.import-review td[data-label="Estado"] li + li {
+  margin-top: 0.65rem;
+}
+.import-summary {
+  align-items: center;
+  flex-wrap: wrap;
+}
+.import-review-submit {
+  margin-left: auto;
+}
+.import-review td {
+  vertical-align: top;
+}
+.import-review .review-field {
+  display: block;
+  margin-bottom: 0.65rem;
+}
+.review-field > span {
+  display: block;
+  font-size: 0.75rem;
+  margin-bottom: 0.2rem;
+}
+.import-review .review-field input,
+.import-review .review-field textarea {
+  min-width: 0;
+  width: 100%;
+  font-size: 0.85rem;
+}
+.import-review .review-field textarea {
+  min-width: 0;
+  resize: vertical;
+}
+.import-review .review-field input[readonly],
+.import-review .review-field textarea[readonly] {
+  border-color: transparent;
+  background: transparent;
+  padding: 0.25rem 0;
+  cursor: text;
+}
+.import-review .review-row-warning td {
+  background: #fff8df;
+}
+.import-review .review-field-warning {
+  padding: 0.4rem;
+  border: 2px solid #ad7519;
+  border-radius: 0.5rem;
+  background: #ffecae;
+}
+.import-review .review-field-warning strong {
+  color: #77500f;
+}
+.review-opening {
+  min-width: 240px;
+  font-weight: normal;
+  text-transform: none;
+  margin-bottom: 1rem;
+}
+.review-opening-row {
+  display: flex;
+  justify-content: flex-end;
+}
+.review-opening-row .review-opening {
+  width: min(100%, 360px);
+}
+.review-opening small,
+.import-review td small {
+  display: block;
+  white-space: normal;
+}
+.review-opening p:empty {
+  display: none;
+}
+.review-selection-warning input {
+  outline: 2px solid #ad7519;
+  outline-offset: 3px;
+}
+@media (max-width: 700px) {
+  .import-review table,
+  .import-review thead,
+  .import-review tbody,
+  .import-review tr,
+  .import-review td,
+  .import-review th {
+    display: block;
+    width: 100%;
+    min-width: 0;
+  }
+  .import-review thead th {
+    display: none;
+  }
+  .import-review thead th:has(.review-opening) {
+    display: block;
+  }
+  .import-review tbody tr {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    margin-bottom: 1rem;
+  }
+  .import-review td {
+    padding: 0.65rem;
+    border: 0;
+  }
+  .import-review td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+  }
+  .import-review .review-field input,
+  .import-review .review-field textarea {
+    min-width: 0;
+  }
+  .review-opening {
+    min-width: 0;
+  }
+}
+.dropzone.has-file {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.65rem 1rem;
+  min-height: 0;
+  flex-wrap: wrap;
+}
+.dropzone.has-file > svg,
+.dropzone.has-file > span:not(.file-choice) {
+  display: none;
+}
+.dropzone.has-file strong {
+  font-size: 0.95rem;
+  overflow-wrap: anywhere;
+}
+.dropzone.has-file .file-choice {
+  margin: 0 0 0 auto;
+}
 .import-account-row,
 .import-preview-heading {
   display: flex;
@@ -17,14 +187,22 @@
   align-items: center;
 }
 .pdf-page-selection {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
   margin: 1rem 0;
-  border: 1px solid var(--line, #dce5db);
-  border-radius: 12px;
-  padding: 1rem;
 }
-.pdf-page-selection .field {
-  max-width: 28rem;
-  margin-top: 1rem;
+.pdf-page-selection input.pdf-page-ranges[type="text"] {
+  width: 11rem;
+  max-width: 100%;
+}
+.pdf-page-selection p,
+.pdf-page-selection .button-row {
+  margin: 0;
+}
+.pdf-page-selection #pdf-range-help {
+  font-size: 0.8rem;
 }
 .pdf-page-selection .button-row label {
   display: flex;

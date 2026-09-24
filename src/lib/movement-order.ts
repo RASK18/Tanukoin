@@ -2,7 +2,7 @@ import type { Movement } from "../data/types";
 import { normalize } from "./finance";
 
 export const orderWarning =
-  "No se ha podido confirmar la secuencia de algunos extractos o su enlace con otras importaciones. El saldo procede del extracto.";
+  "No se ha podido confirmar la secuencia de algunos extractos o su enlace con otras importaciones. Los saldos calculados se identifican por separado.";
 
 export const orderGroup = (m: Movement) =>
   JSON.stringify([m.accountId, m.currency]);
@@ -165,6 +165,8 @@ export function inferSourceOrder(
         edited.has(b.id) ||
         a.balance === undefined ||
         b.balance === undefined ||
+        a.balanceSource === "calculated" ||
+        b.balanceSource === "calculated" ||
         a.sourcePosition?.position === undefined ||
         b.sourcePosition?.previousPosition !== a.sourcePosition.position
       )
@@ -235,13 +237,14 @@ function uniqueAnchor(m: Movement, saved: Movement[]) {
   const sameAccount = saved.filter(
     (s) => s.accountId === m.accountId && s.currency === m.currency,
   );
-  if (m.balance === undefined) return;
+  if (m.balance === undefined || m.balanceSource === "calculated") return;
   const matches = sameAccount.filter(
     (s) =>
       s.date === m.date &&
       s.amount === m.amount &&
       normalize(s.description) === normalize(m.description) &&
-      s.balance === m.balance,
+      s.balance === m.balance &&
+      !s.balanceSource,
   );
   return matches.length === 1 ? matches[0] : undefined;
 }

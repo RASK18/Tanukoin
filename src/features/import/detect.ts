@@ -47,6 +47,7 @@ const aliases: Record<keyof DetectedLayout["columns"], string[]> = {
     "balance",
     "running balance",
   ],
+  balanceSource: ["origen del saldo"],
   debit: ["cargo", "cargos", "debe", "debit", "withdrawal", "dinero saliente"],
   credit: ["abono", "abonos", "haber", "credit", "deposit", "dinero entrante"],
   merchant: [
@@ -221,6 +222,7 @@ export function validateDetectedLayout(
   }
   // Known optional fields must survive AI assistance and currency validation.
   for (const key of [
+    "balanceSource",
     "currency",
     "time",
     "secondaryTime",

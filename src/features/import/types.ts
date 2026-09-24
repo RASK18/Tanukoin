@@ -15,6 +15,7 @@ export interface DetectedLayout {
     credit: number;
     merchant: number;
     balance?: number;
+    balanceSource?: number;
     currency?: number;
     valueDate?: number;
     bookingDate?: number;
@@ -37,6 +38,28 @@ export interface Sheet {
   informational?: boolean;
   warnings?: string[];
   currency?: string;
+  issues?: ImportIssue[];
+}
+export type ReviewField =
+  | "date"
+  | "secondaryDate"
+  | "time"
+  | "secondaryTime"
+  | "description"
+  | "merchant"
+  | "notes"
+  | "amount"
+  | "balance"
+  | "originalAmount"
+  | "originalCurrency"
+  | "fee"
+  | "exchangeRate";
+export interface ImportIssue {
+  noteFragments?: string[];
+  resolved?: boolean;
+  row: number;
+  fields: ReviewField[];
+  message: string;
 }
 export interface ParsedFile {
   name: string;
@@ -46,6 +69,9 @@ export interface ParsedFile {
   kind?: "pdf" | "table";
 }
 export interface Candidate {
+  reviewOriginalNotes?: string;
+  issues?: ImportIssue[];
+  edits?: Partial<Record<ReviewField, string>>;
   /** Original date columns, used only to recognize document direction before normalization. */
   sourceDates?: string[];
   orderEdited?: boolean;

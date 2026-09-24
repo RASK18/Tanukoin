@@ -31,6 +31,8 @@ export interface Movement {
   originalAmount?: number;
   originalCurrency?: string;
   balance?: number;
+  /** A running total entered/calculated during review, not a bank-reported balance. */
+  balanceSource?: "calculated";
   /** Fee in the movement currency's minor units; already included in amount. */
   fee?: number;
   /** Explicit source quote (decimal or currency equation), never a computed rate. */

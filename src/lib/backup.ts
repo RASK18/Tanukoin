@@ -48,6 +48,7 @@ const fields: Record<(typeof tables)[number], string[]> = {
     "fee",
     "exchangeRate",
     "balance",
+    "balanceSource",
     "time",
     "secondaryTime",
     "sourcePosition",
@@ -252,6 +253,12 @@ export function validateBackup(input: unknown): Snapshot {
       }
       if (row.currency && !/^[A-Z]{3}$/.test(String(row.currency)))
         throw new Error("Moneda inválida");
+      if (
+        row.balanceSource !== undefined &&
+        (row.balanceSource !== "calculated" ||
+          !Number.isSafeInteger(row.balance))
+      )
+        throw new Error("Origen del saldo inválido");
       for (const key of ["date", "secondaryDate", "anchorDate", "nextDate"])
         if (
           row[key] &&

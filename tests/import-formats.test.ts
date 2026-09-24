@@ -601,6 +601,50 @@ it("Revolut PDF separa importe extranjero de importe bruto y comisión sin volve
   });
 });
 
+it.each([
+  ["Conversión a JPY", "2.000¥", "JPY", 2000],
+  ["Conversión a USD", "15,25$", "USD", 1525],
+  ["Conversión a EUR", "2.000¥", undefined, undefined],
+  ["Conversión a EUR", "15,25$", undefined, undefined],
+  ["Compra ficticia", "2.000¥", undefined, undefined],
+  ["Conversión a JPY", "15,25$", undefined, undefined],
+  ["Conversión a USD", "2.000¥", undefined, undefined],
+  ["Conversión a JPY", "2.000¥ 3.000¥", undefined, undefined],
+] as const)(
+  "Revolut PDF resuelve símbolos solo con divisa explícita compatible: %s / %s",
+  (concept, foreign, originalCurrency, originalAmount) => {
+    const result = prepared([
+      readPdfPage(
+        [
+          text(400, 800, "Extracto en EUR"),
+          text(43, 700, "Fecha"),
+          text(125, 700, "Descripción"),
+          text(335, 700, "Dinero saliente", 55),
+          text(417, 700, "Dinero entrante", 56),
+          text(535, 700, "Saldo"),
+          text(43, 675, "20 sep 2026"),
+          text(125, 675, concept),
+          text(335, 675, "10,00€"),
+          text(535, 675, "90,00€"),
+          text(335, 665, foreign),
+        ],
+        1,
+        {},
+      ),
+    ]);
+    expect(result.errors).toEqual([]);
+    expect(result.candidates[0].movement).toMatchObject({
+      amount: -1000,
+      balance: 9000,
+      originalAmount,
+      originalCurrency,
+    });
+    expect(result.warnings).toHaveLength(originalCurrency ? 0 : 1);
+    if (!originalCurrency)
+      expect(result.candidates[0].movement.notes).toContain(foreign);
+  },
+);
+
 it("reconstruye OpenBank con cabecera partida y concepto centrado de varias líneas", () => {
   const sheet = readPdfPage(
     [
