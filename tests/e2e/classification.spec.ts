@@ -374,6 +374,9 @@ test("el resumen desglosa categorías, aplica etiquetas y funciona offline y en 
   await page.getByRole("button", { name: "Editar Iberia ficticia" }).click();
   await page.getByRole("button", { name: "Quitar Laura", exact: true }).click();
   await page.getByRole("button", { name: "Guardar cambios" }).click();
+  await expect(
+    page.getByRole("dialog", { name: "Editar movimiento", exact: true }),
+  ).toBeHidden();
   await page.reload();
   const row = page.getByRole("row").filter({ hasText: "Iberia ficticia" });
   await expect(row).toContainText("Vacaciones Japón");

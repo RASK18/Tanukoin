@@ -75,6 +75,16 @@ test("catálogo compacto con WebGPU y recomendación fija, también en móvil", 
       .boundingBox())!;
     const card = (await recommended.boundingBox())!;
     expect(badge.y).toBeLessThan(card.y);
+    for (const button of [offline, uninstall]) {
+      const box = (await button.boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(card.x);
+      expect(box.x + box.width).toBeLessThanOrEqual(card.x + card.width);
+      expect(
+        await button.evaluate(
+          (element) => element.scrollWidth <= element.clientWidth,
+        ),
+      ).toBe(true);
+    }
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= innerWidth,

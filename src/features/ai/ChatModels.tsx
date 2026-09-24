@@ -201,7 +201,9 @@ export function ChatModels({
                     </p>
                   </div>
                 )}
-                <div className="button-row">
+                <div
+                  className={`button-row${ready ? " model-ready-actions" : ""}`}
+                >
                   {ready ? (
                     <button
                       className="button primary"

@@ -225,6 +225,17 @@
   white-space: nowrap;
   padding-inline: 10px;
 }
+.ai-page .chat-model-grid .model-ready-actions {
+  flex-wrap: nowrap;
+  align-items: stretch;
+}
+.ai-page .chat-model-grid .model-ready-actions .button {
+  min-width: 0;
+  white-space: normal;
+}
+.ai-page .chat-model-grid .model-ready-actions .button svg {
+  flex-shrink: 0;
+}
 .ai-page .button {
   border-radius: 8px;
   font-size: 12px;
