@@ -1,3 +1,4 @@
+import { validateImportMetadata } from "../features/import/reconcile";
 import { makeTag, validateCategoryTree } from "./classification";
 import { db, readSnapshot } from "../data/db";
 import type { Snapshot } from "../data/types";
@@ -52,6 +53,9 @@ const fields: Record<(typeof tables)[number], string[]> = {
     "time",
     "secondaryTime",
     "sourcePosition",
+    "reference",
+    "manualFields",
+    "occurrences",
     "order",
     "categoryId",
     "tagIds",
@@ -321,14 +325,18 @@ export function validateBackup(input: unknown): Snapshot {
     }
   }
   const s = data as unknown as Snapshot;
+  s.movements.forEach(validateImportMetadata);
   s.movements.forEach(validateOriginalAmount);
   s.movements.forEach(validateMovementCosts);
   s.movements.forEach(validateMovementDates);
   for (const movement of s.movements)
     if (
-      [movement.description, movement.merchant, movement.notes].some(
-        containsIban,
-      )
+      [
+        movement.description,
+        movement.reference || "",
+        movement.merchant,
+        movement.notes,
+      ].some(containsIban)
     )
       throw new Error(
         "La copia contiene IBAN en los textos de movimientos; no se guardarán esos datos.",

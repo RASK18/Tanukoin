@@ -1,3 +1,4 @@
+import { importFields } from "../features/import/reconcile";
 import { db } from "./db";
 import type { Category, Movement, Rule, Tag } from "./types";
 import {
@@ -222,7 +223,7 @@ export async function saveEditedMovement(
 ) {
   await db.transaction(
     "rw",
-    [db.movements, db.categories, db.tags, db.relations],
+    [db.movements, db.categories, db.tags, db.relations, db.embeddings],
     async () => {
       const current = await db.movements.get(movement.id);
       if (!current) throw new Error("El movimiento ya no existe.");
@@ -237,6 +238,18 @@ export async function saveEditedMovement(
           : current.categorySource,
         aiSuggestion: categoryChanged ? undefined : current.aiSuggestion,
       };
+      next.manualFields = [
+        ...new Set([
+          ...(current.manualFields || []),
+          ...importFields.filter((field) => next[field] !== current[field]),
+        ]),
+      ];
+      if (
+        next.description !== current.description ||
+        next.reference !== current.reference ||
+        next.merchant !== current.merchant
+      )
+        await db.embeddings.delete(next.id);
       validateOriginalAmount(next);
       validateMovementCosts(next);
       validateMovementDates(next);

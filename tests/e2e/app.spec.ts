@@ -57,6 +57,127 @@ async function storedMovements(page: Page) {
   );
 }
 
+test("reconoce secuencias, exige resolver conflictos, amplía y reimporta sin duplicar", async ({
+  page,
+}) => {
+  await createAccount(page);
+  const first = Buffer.from(
+    "Fecha;Concepto;Importe\n" +
+      [1, 2, 3, 4, 5].map((n) => `20/09/2026;Compra ${n};${n}`).join("\n"),
+  );
+  const second = Buffer.from(
+    "Fecha;Concepto;Importe;Referencia\n" +
+      [2, 3, 4, 5, 6, 7, 8]
+        .map((n) => `20/09/2026;Cargo ${n};${n};Detalle ${n}`)
+        .join("\n"),
+  );
+  await importFile(page, "primero.csv", first);
+  await reviewFile(page);
+  await page
+    .getByRole("button", { name: "Importar 5 movimientos", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await importFile(page, "segundo.csv", second);
+  await reviewFile(page);
+  await expect(page.locator(".import-review-submit")).toBeDisabled();
+  const choices = page.getByRole("combobox", {
+    name: /Resolver Concepto fila/,
+  });
+  await expect(choices).toHaveCount(4);
+  await page.screenshot({path:"artifacts/import-enrichment-desktop.png",fullPage:true});
+  for (const choice of await choices.all()) await choice.selectOption("saved");
+  await expect(
+    page.getByRole("button", { name: "Guardar 3 nuevos y 4 actualizaciones" }),
+  ).toBeEnabled();
+  // Cancellation cannot persist the proposed enrichment.
+  await page.keyboard.press("Escape");
+  expect((await storedMovements(page)).every((m) => !m.reference)).toBe(true);
+  await importFile(page, "segundo.csv", second);
+  await reviewFile(page);
+  for (const choice of await page
+    .getByRole("combobox", { name: /Resolver Concepto fila/ })
+    .all())
+    await choice.selectOption("saved");
+  await page
+    .getByRole("button", { name: "Guardar 3 nuevos y 4 actualizaciones" })
+    .click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await page.reload();
+  const saved = await storedMovements(page);
+  expect(saved).toHaveLength(8);
+  expect(saved.find((m) => m.description === "Compra 2").reference).toBe(
+    "Detalle 2",
+  );
+  await importFile(page, "primero.csv", first);
+  await reviewFile(page);
+  await expect(
+    page.getByLabel("Saldo antes del primer movimiento"),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Finalizar revisión" }),
+  ).toBeEnabled();
+  await page.getByRole("button", { name: "Finalizar revisión" }).click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  expect(await storedMovements(page)).toEqual(saved);
+});
+
+test("amplía solo fechas y referencia, sin altas, y una duda exige decisión", async ({
+  page,
+}) => {
+  await createAccount(page);
+  const file = (date: string, other: string, reference: string) =>
+    Buffer.from(
+      `Fecha;Fecha secundaria;Concepto;Importe;Saldo;Referencia\n${date};${other};Compra ficticia;-1,71;9,89;${reference}`,
+    );
+  await importFile(page, "fecha-unica.csv", file("19/07/2026", "", ""));
+  await reviewFile(page);
+  await page
+    .getByRole("button", { name: "Importar 1 movimientos", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  const id = (await storedMovements(page))[0].id;
+  await importFile(
+    page,
+    "dos-fechas.csv",
+    file("18/07/2026", "19/07/2026", "Pedido ficticio"),
+  );
+  await reviewFile(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await page
+    .getByRole("button", { name: "Guardar 0 nuevos y 1 actualizaciones" })
+    .click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await page.reload();
+  expect((await storedMovements(page))[0]).toMatchObject({
+    id,
+    date: "2026-07-18",
+    secondaryDate: "2026-07-19",
+    reference: "Pedido ficticio",
+    description: "Compra ficticia",
+  });
+  await importFile(
+    page,
+    "dudoso.csv",
+    Buffer.from("Fecha;Concepto;Importe\n19/07/2026;Compra ficticia;-1,71"),
+  );
+  await reviewFile(page);
+  await expect(page.locator(".import-review-submit")).toBeDisabled();
+  await page
+    .getByRole("combobox", { name: "Decisión fila 2", exact: true })
+    .selectOption({ value: id });
+  await expect(
+    page.getByLabel("Saldo antes del primer movimiento"),
+  ).toHaveCount(0);
+  await expect(page.locator(".import-review-submit")).toBeEnabled();
+  await page.keyboard.press("Escape");
+  expect(await storedMovements(page)).toHaveLength(1);
+});
+
 test("revisión completa: avisos por campo, corrección limitada y datos originales visibles", async ({
   page,
 }) => {
@@ -439,7 +560,8 @@ test("contraparte, referencia e IBAN: importación, edición, CSV y copia sin da
   page,
 }) => {
   const iban = "ES00" + "0".repeat(20);
-  const description = "Transferencia a Ana Prueba. Factura 01";
+  const description = "Transferencia a Ana Prueba";
+  const reference = "Factura 01";
   await createAccount(page);
   await importFile(
     page,
@@ -450,11 +572,13 @@ test("contraparte, referencia e IBAN: importación, edición, CSV y copia sin da
   );
   await reviewFile(page);
   await expect(page.getByLabel("Concepto fila 2")).toHaveValue(description);
+  await expect(page.getByLabel("Referencia fila 2")).toHaveValue(reference);
   await page.getByRole("button", { name: "Importar 1 movimientos" }).click();
   await expect(page.getByRole("dialog")).not.toBeVisible();
   const [initial] = await storedMovements(page);
   expect(initial).toMatchObject({
     description,
+    reference,
     merchant: "Ana Prueba",
     notes: "",
     amount: -1000,
@@ -462,7 +586,9 @@ test("contraparte, referencia e IBAN: importación, edición, CSV y copia sin da
   });
   expect(JSON.stringify(initial)).not.toContain(iban);
   await page.reload();
-  await page.getByRole("button", { name: `Editar ${description}` }).click();
+  await page
+    .getByRole("button", { name: `Editar ${description}. ${reference}` })
+    .click();
   await expect(page.getByLabel("Contraparte", { exact: true })).toHaveValue(
     "Ana Prueba",
   );
@@ -477,6 +603,7 @@ test("contraparte, referencia e IBAN: importación, edición, CSV y copia sin da
   const [edited] = await storedMovements(page);
   expect(edited).toMatchObject({
     description,
+    reference,
     merchant: "Ana Prueba",
     notes: "Nota personal",
     order: initial.order,
@@ -490,12 +617,15 @@ test("contraparte, referencia e IBAN: importación, edición, CSV y copia sin da
   const exported = Buffer.concat(chunks);
   expect(exported.toString()).not.toContain(iban);
   expect(exported.toString()).toContain(description);
+  expect(exported.toString()).toContain(reference);
+  expect(exported.toString()).toContain("Referencia");
   await importFile(page, "exportacion-ficticia.csv", exported);
   await reviewFile(page);
   await expect(page.getByLabel("Concepto fila 2")).toHaveValue(description);
+  await expect(page.getByLabel("Referencia fila 2")).toHaveValue(reference);
   await expect(
-    page.getByRole("button", { name: "Importar 0 movimientos" }),
-  ).toBeDisabled();
+    page.getByRole("button", { name: "Finalizar revisión" }),
+  ).toBeEnabled();
   await page.getByRole("button", { name: "Cerrar", exact: true }).click();
   await page.goto("#/ajustes");
   const backupDownload = page.waitForEvent("download");
@@ -509,6 +639,7 @@ test("contraparte, referencia e IBAN: importación, edición, CSV y copia sin da
   expect(raw).not.toContain(iban);
   expect(JSON.parse(raw).data.movements[0]).toMatchObject({
     description,
+    reference,
     merchant: "Ana Prueba",
     notes: "Nota personal",
   });
@@ -1084,11 +1215,9 @@ test("cuenta, importación CSV, edición, exportación y reimportación con dupl
     .setInputFiles({ name: "extracto.csv", mimeType: "text/csv", buffer: csv });
   await reviewFile(page);
   await expect(
-    page.getByRole("button", { name: "Importar 0 movimientos" }),
-  ).toBeDisabled();
-  await expect(
-    page.getByText("Posible duplicado", { exact: true }),
-  ).toHaveCount(3);
+    page.getByRole("button", { name: "Finalizar revisión" }),
+  ).toBeEnabled();
+  await expect(page.getByText("Ya importado", { exact: true })).toHaveCount(3);
   expect(outside).toEqual([]);
 });
 for (const bookType of ["xlsx", "xls"] as const)
@@ -1257,18 +1386,14 @@ test("arrastrar archivo detecta columnas y conserva operaciones iguales con dist
   await expect(page.locator(".preview-table")).toContainText("100,00");
   await expect(page.locator(".preview-table")).toContainText("-4,90");
   await reviewFile(page);
-  await expect(
-    page.getByText("Posible duplicado", { exact: true }),
-  ).toHaveCount(0);
+  await expect(page.getByText("Ya importado", { exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Importar 2 movimientos" }).click();
   await importFile(page, "ficticio.csv", Buffer.from(content));
   await reviewFile(page);
   await expect(
-    page.getByRole("button", { name: "Importar 0 movimientos" }),
-  ).toBeDisabled();
-  await expect(
-    page.getByText("Posible duplicado", { exact: true }),
-  ).toHaveCount(2);
+    page.getByRole("button", { name: "Finalizar revisión" }),
+  ).toBeEnabled();
+  await expect(page.getByText("Ya importado", { exact: true })).toHaveCount(2);
 });
 test("historial de ubicaciones y copias requieren confirmación", async ({
   page,

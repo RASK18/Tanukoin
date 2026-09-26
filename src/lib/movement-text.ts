@@ -117,10 +117,13 @@ export function removeIbans(value: string): string {
 }
 
 export function sanitizeMovementText(
-  m: Pick<Movement, "description" | "merchant" | "notes">,
+  m: Pick<Movement, "description" | "merchant" | "notes" | "reference">,
 ) {
   return {
     description: removeIbans(m.description) || "Sin concepto",
+    ...(m.reference !== undefined
+      ? { reference: removeIbans(m.reference) || undefined }
+      : {}),
     merchant: removeIbans(m.merchant),
     notes: removeIbans(m.notes),
   };
@@ -198,26 +201,29 @@ export function normalizeImportedText(input: {
     ...descriptionParts.references,
     ...noteParts.references,
   ].filter(Boolean);
-  let description =
-    base ||
-    explicit ||
-    references.shift() ||
-    clean(input.fallback) ||
-    "Sin concepto";
-  const words = (s: string) =>
-    ` ${s
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .toLowerCase()
-      .replace(/[^\p{L}\p{N}]+/gu, " ")
-      .trim()} `;
-  for (const ref of references) {
-    if (words(description).includes(words(ref))) continue;
-    description = `${description.replace(/[.\s]+$/, "")}. ${ref.replace(/^[.\s]+/, "")}`;
-  }
+  const description =
+    base || explicit || clean(input.fallback) || "Sin concepto";
+  const reference = [...new Set(references)].join(". ") || undefined;
   const merchant =
     explicit ||
     inferCounterparty(base) ||
     (input.namedCounterparty ? base : "");
-  return sanitizeMovementText({ description, merchant, notes: noteParts.text });
+  return sanitizeMovementText({
+    description,
+    reference,
+    merchant,
+    notes: noteParts.text,
+  });
+}
+
+export function movementDescription(
+  m: Pick<Movement, "description" | "reference">,
+): string {
+  const reference = m.reference?.trim();
+  if (
+    !reference ||
+    m.description.toLocaleLowerCase().includes(reference.toLocaleLowerCase())
+  )
+    return m.description;
+  return `${m.description.replace(/[.\s]+$/, "")}. ${reference.replace(/^[.\s]+/, "")}`;
 }

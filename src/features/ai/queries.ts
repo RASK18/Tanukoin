@@ -1,3 +1,4 @@
+import { movementDescription } from "../../lib/movement-text";
 import {
   categoryTree,
   matchesTags,
@@ -385,14 +386,14 @@ export function executeQuery(
       const place =
         saved && data.locations.find((l) => l.id === saved.locationId);
       if (place)
-        return `${m.date} · ${m.merchant || m.description}: ${place.name} (${saved!.status === "confirmed" ? "confirmado" : "sugerido"}).`;
+        return `${m.date} · ${movementDescription(m)}: ${place.name} (${saved!.status === "confirmed" ? "confirmado" : "sugerido"}).`;
       const candidates = locationCandidates(
         m,
         data.locations,
         data.settings[0]?.timezone || "Europe/Madrid",
         false,
       );
-      return `${m.date} · ${m.merchant || m.description}: ${
+      return `${m.date} · ${movementDescription(m)}: ${
         candidates.length
           ? candidates
               .slice(0, 3)
@@ -448,7 +449,7 @@ export function executeQuery(
           value = q.op === "min" ? values[0] : values[values.length - 1];
           const matches = sample.filter((m) => Math.abs(m.amount) === value);
           selected.push(...matches);
-          return `${currency}: ${label} ${money(value, currency)}. ${matches.map((m) => `${m.date} · ${m.merchant || m.description}`).join("; ")} (${matches.length} coincidencias).`;
+          return `${currency}: ${label} ${money(value, currency)}. ${matches.map((m) => `${m.date} · ${movementDescription(m)}`).join("; ")} (${matches.length} coincidencias).`;
         }
         // BigInt keeps sums exact in minor units; round once, only for display.
         const numerator =

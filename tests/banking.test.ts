@@ -51,7 +51,7 @@ it.each(["DBIT", "CRDT"])(
     );
     expect(m).toMatchObject({
       merchant: "Ana Prueba",
-      description: "Ana Prueba. Factura 01",
+      description: "Ana Prueba", reference: "Factura 01",
       notes: "",
     });
     expect(JSON.stringify(m)).not.toContain(iban);

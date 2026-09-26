@@ -112,6 +112,7 @@ export function movementSearchText(
   return normalize(
     [
       movement.description,
+      movement.reference || "",
       movement.merchant,
       movement.notes,
       tree.path(movement.categoryId),

@@ -25,6 +25,12 @@ export interface Movement {
   amount: number;
   currency: Currency;
   description: string;
+  reference?: string;
+  manualFields?: string[];
+  occurrences?: {
+    documentId: string;
+    position: NonNullable<Movement["sourcePosition"]>;
+  }[];
   merchant: string;
   date: string;
   secondaryDate?: string;

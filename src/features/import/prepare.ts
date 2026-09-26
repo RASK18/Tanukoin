@@ -61,7 +61,13 @@ export function prepareImport(
                 ? offset + c.row - 1
                 : i === 0 &&
                     before &&
-                    previousSheet === index - 1 &&
+                    file.sheets
+                      .slice(previousSheet + 1, index)
+                      .every(
+                        (s, offset) =>
+                          s.informational &&
+                          indices.includes(previousSheet + 1 + offset),
+                      ) &&
                     before.row === file.sheets[previousSheet].rows.length &&
                     c.row === layout.headerRow + 2
                   ? before.movement.sourcePosition?.position

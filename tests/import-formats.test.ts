@@ -304,9 +304,10 @@ it("N26 usa el importe de la cuenta y combina contraparte/referencia sin usarlas
   expect(result.errors).toEqual([]);
   expect(result.candidates.map((c) => c.movement.description)).toEqual([
     "Tienda ficticia",
-    "Empresa ficticia. Factura ficticia",
-    "Abono ficticio",
+    "Empresa ficticia",
+    "Transfer",
   ]);
+  expect(result.candidates.map((c) => c.movement.reference)).toEqual([undefined,"Factura ficticia","Abono ficticio"]);
   expect(result.candidates[0].movement.amount).toBe(-350);
   expect(result.candidates[0].movement).toMatchObject({
     originalAmount: 500,
@@ -476,8 +477,7 @@ it.each([false, true])(
     const result = prepared([sheet]);
     expect(result.errors).toEqual([]);
     expect(result.candidates[0].movement).toMatchObject({
-      description:
-        "Transferencia a Ana Prueba. Reserva ficticia para septiembre",
+      description: "Transferencia a Ana Prueba", reference: "Reserva ficticia para septiembre",
       merchant: "Ana Prueba",
       notes: "A Ana Prueba",
       fee: 50,
@@ -517,7 +517,7 @@ it.each(["xls", "xlsx"] as const)(
     );
     expect(result.errors).toEqual([]);
     expect(result.candidates[0].movement).toMatchObject({
-      description: "Transferencia a Ana Prueba. Reserva ficticia",
+      description: "Transferencia a Ana Prueba", reference: "Reserva ficticia",
       merchant: "Ana Ejemplo",
       notes: "",
       amount: -1000,
@@ -563,7 +563,7 @@ it("la propuesta de IA no puede omitir contraparte, referencia o notas reconocid
   expect(result.errors).toEqual([]);
   expect(result.candidates[0].movement).toMatchObject({
     merchant: "Ana Prueba",
-    description: "Transferencia. Factura 01",
+    description: "Transferencia", reference: "Factura 01",
     notes: "",
   });
 });
@@ -777,7 +777,7 @@ it("N26 PDF incorpora referencias sin etiqueta, conservando tipo y BIC en notas"
   ]);
   expect(result.errors).toEqual([]);
   expect(result.candidates[0].movement).toMatchObject({
-    description: "Ana Prueba. Reserva ficticia para septiembre",
+    description: "Ana Prueba", reference: "Reserva ficticia para septiembre",
     merchant: "Ana Prueba",
     notes: "Ingresos\n· BIC: FAKEESXX",
     amount: 1000,

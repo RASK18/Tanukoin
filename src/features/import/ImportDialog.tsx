@@ -1,4 +1,5 @@
-import { validAutomaticCategory } from "../../data/classification";
+import { reconcileImport } from "./reconcile";
+import { commitImport, ImportChangedError } from "./commit";
 import { getActiveChatModel } from "../ai/model-store";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -51,6 +52,9 @@ export function ImportDialog({
   initial?: Movement[];
 }) {
   const { data, run, notify } = useApp();
+  const [reviewSnapshot, setReviewSnapshot] = useState<Movement[]>(
+    data.movements,
+  );
   const [parsed, setParsed] = useState<ParsedFile>();
   const [file, setFile] = useState<File>();
   const [sheet, setSheet] = useState(0);
@@ -82,6 +86,7 @@ export function ImportDialog({
         movement,
         row: i + 1,
         ...check(movement),
+        selected: true,
       })) || []
     );
   });
@@ -214,8 +219,15 @@ export function ImportDialog({
     );
     return !related.length || related.some((issue) => !issue.resolved);
   });
+  const reconciliation = useMemo(
+    () => reconcileImport(candidates, reviewSnapshot),
+    [candidates, reviewSnapshot],
+  );
   const needsBalances =
-    review && !!parsed && candidates.length > 0 && !prepared?.hasSourceBalances;
+    review &&
+    !!parsed &&
+    !prepared?.hasSourceBalances &&
+    reconciliation.some((c) => c.status === "new" && c.selected);
   const reviewed = useMemo(() => {
     let rows = candidates,
       error = "";
@@ -230,26 +242,38 @@ export function ImportDialog({
     return {
       rows: orderMovements(rows.map((c) => c.movement)).map((m) => ({
         ...byId.get(m.id)!,
-        movement: applyRules(m, data.rules),
+        ...reconciliation.find((c) => c.movement.id === m.id)!,
+        movement:
+          reconciliation.find((c) => c.movement.id === m.id)?.status === "new"
+            ? applyRules(m, data.rules)
+            : m,
       })),
       error,
     };
-  }, [candidates, needsBalances, openingBalance, data.rules]);
+  }, [candidates, needsBalances, openingBalance, data.rules, reconciliation]);
+  const newCount = reconciliation.filter((c) => c.status === "new").length;
+  const updateCount = reconciliation.filter(
+    (c) => c.status === "update",
+  ).length;
+  const blocked = reconciliation.some((c) => c.blocking);
+  const saveLabel = updateCount
+    ? `Guardar ${newCount} nuevos y ${updateCount} actualizaciones`
+    : newCount
+      ? `Importar ${newCount} movimientos`
+      : "Finalizar revisión";
   const orderPreview = useMemo(() => {
-    const rows = review ? candidates : prepared?.candidates || [];
-    const source = inferSourceOrder(
-      rows.map((c) => c.movement),
-      new Set(rows.filter((c) => c.orderEdited).map((c) => c.movement.id)),
-    );
-    const included = new Set(
-      rows.filter((c) => c.selected).map((c) => c.movement.id),
-    );
+    const rows = review ? reconciliation : [];
     return reconcileMovementOrder(
       data.movements,
-      source.filter((m) => included.has(m.id)),
-      source,
+      rows.filter((c) => c.status === "new").map((c) => c.movement),
+      rows.map((c) => c.movement),
+      new Map(
+        rows
+          .filter((c) => c.target && c.status !== "omit" && !c.blocking)
+          .map((c) => [c.movement.id, c.target!.id]),
+      ),
     );
-  }, [review, candidates, prepared, data.movements]);
+  }, [review, reconciliation, data.movements]);
   function preview() {
     if (
       !target ||
@@ -259,7 +283,8 @@ export function ImportDialog({
       !prepared.candidates.length
     )
       return;
-    setCandidates(prepared.candidates);
+    setReviewSnapshot(data.movements);
+    setCandidates(prepared.candidates.map((c) => ({ ...c, selected: true })));
     setErrors([]);
     setReview(true);
     setPreviewPage(0);
@@ -321,7 +346,8 @@ export function ImportDialog({
       savingRef.current ||
       reviewed.error ||
       Object.keys(editErrors).length ||
-      !candidates.some((c) => c.selected)
+      blocked ||
+      !candidates.length
     )
       return;
     savingRef.current = true;
@@ -340,7 +366,8 @@ export function ImportDialog({
           ),
         );
         const inferred = new Map(source.map((m) => [m.id, m]));
-        const selected = reviewed.rows.filter((c) => c.selected);
+        const snapshot = reviewSnapshot;
+        const selected = reviewed.rows.filter((c) => c.status === "new");
         let prepared: Movement[] = [];
         for (let i = 0; i < selected.length; i += 250) {
           prepared.push(
@@ -360,7 +387,7 @@ export function ImportDialog({
           });
           await new Promise((resolve) => setTimeout(resolve, 0));
         }
-        if ((await db.models.get("embeddings"))?.ready) {
+        if (prepared.length && (await db.models.get("embeddings"))?.ready) {
           try {
             setSaving({ phase: "Preparando la IA local" });
             const { categorize } = await import("../ai/client");
@@ -382,48 +409,37 @@ export function ImportDialog({
           }
         }
         setSaving({ phase: "Comprobando movimientos" });
-        await db.transaction(
-          "rw",
-          [db.movements, db.categories, db.accounts],
-          async () => {
-            const accounts = new Map(
-              (await db.accounts.toArray()).map((a) => [a.id, a]),
+        const documentId = file
+          ? Array.from(
+              new Uint8Array(
+                await crypto.subtle.digest("SHA-256", await file.arrayBuffer()),
+              ),
+              (b) => b.toString(16).padStart(2, "0"),
+            ).join("")
+          : importId;
+        try {
+          orderUncertain = await commitImport(
+            reviewed.rows,
+            snapshot,
+            prepared,
+            source,
+            documentId,
+            (done, total) =>
+              setSaving({ phase: "Guardando movimientos", done, total }),
+          );
+        } catch (error) {
+          if (error instanceof ImportChangedError) {
+            setReviewSnapshot(await db.movements.toArray());
+            setCandidates((rows) =>
+              rows.map((c) => ({
+                ...c,
+                decision: undefined,
+                resolutions: undefined,
+              })),
             );
-            if (
-              prepared.some(
-                (m) => accounts.get(m.accountId)?.currency !== m.currency,
-              )
-            )
-              throw new Error(
-                "La cuenta de destino ya no existe o ha cambiado de moneda. Vuelve a seleccionar una cuenta.",
-              );
-            const categories = new Set(
-              (await db.categories.toArray()).map((c) => c.id),
-            );
-            prepared = prepared.map((m) =>
-              validAutomaticCategory(m, categories),
-            );
-            const saved = await db.movements.toArray();
-            const pending = prepared;
-            const ordered = reconcileMovementOrder(saved, pending, source);
-            orderUncertain = ordered.uncertain;
-            if (ordered.updates.length)
-              await db.movements.bulkPut(ordered.updates);
-            setSaving({
-              phase: "Guardando movimientos",
-              done: 0,
-              total: pending.length,
-            });
-            for (let i = 0; i < pending.length; i += 250) {
-              await db.movements.bulkAdd(ordered.pending.slice(i, i + 250));
-              setSaving({
-                phase: "Guardando movimientos",
-                done: Math.min(i + 250, pending.length),
-                total: pending.length,
-              });
-            }
-          },
-        );
+          }
+          throw error;
+        }
       })(),
       "Movimientos importados. Todo se ha guardado en este navegador.",
     );
@@ -447,17 +463,11 @@ export function ImportDialog({
       const movement = resolved.movement;
       next[index] = {
         ...resolved,
+        resolutions: undefined,
         orderEdited:
           candidate.orderEdited ||
           movement.amount !== candidate.movement.amount ||
           movement.balance !== candidate.movement.balance,
-        ...(fingerprint(movement) !== fingerprint(candidate.movement) ||
-        movement.balance !== candidate.movement.balance
-          ? {
-              balanceMissing: false,
-              ...duplicateChecker(data.movements)(movement),
-            }
-          : {}),
       };
       setEditErrors((current) => {
         const next = { ...current };
@@ -876,18 +886,14 @@ export function ImportDialog({
           )}
           <div className="import-summary">
             <span>
-              <strong>{candidates.filter((c) => c.selected).length}</strong>{" "}
-              seleccionados
+              <strong>{newCount}</strong> nuevos
             </span>
             <span>
-              <strong>
-                {candidates.filter((c) => c.duplicate !== "none").length}
-              </strong>{" "}
+              <strong>{reconciliation.filter((c) => !!c.target).length}</strong>{" "}
               coincidencias con movimientos guardados
             </span>
             <span>
-              <strong>{candidates.filter((c) => !c.selected).length}</strong>{" "}
-              descartados
+              <strong>{updateCount}</strong> actualizaciones
             </span>
             <button
               className="button primary import-review-submit"
@@ -895,12 +901,12 @@ export function ImportDialog({
                 loading ||
                 Object.keys(editErrors).length > 0 ||
                 !!reviewed.error ||
-                !candidates.some((c) => c.selected)
+                blocked ||
+                !candidates.length
               }
               onClick={save}
             >
-              <Check size={17} /> Importar{" "}
-              {candidates.filter((c) => c.selected).length} movimientos
+              <Check size={17} /> {saveLabel}
             </button>
           </div>
           {!!reviewWarnings.length && (
@@ -914,6 +920,25 @@ export function ImportDialog({
             </details>
           )}
           <ReviewTable
+            saved={reviewSnapshot}
+            onDecision={(id, decision) =>
+              setCandidates((rows) =>
+                rows.map((c) =>
+                  c.movement.id === id
+                    ? { ...c, decision, selected: true, resolutions: undefined }
+                    : c,
+                ),
+              )
+            }
+            onResolve={(id, key, value) =>
+              setCandidates((rows) =>
+                rows.map((c) =>
+                  c.movement.id === id
+                    ? { ...c, resolutions: { ...c.resolutions, [key]: value } }
+                    : c,
+                ),
+              )
+            }
             candidates={reviewed.rows.slice(
               previewPage * 50,
               previewPage * 50 + 50,

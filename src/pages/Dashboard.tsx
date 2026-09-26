@@ -1,3 +1,4 @@
+import { movementDescription } from "../lib/movement-text";
 import { categoryTree, matchesTags, type TagMode } from "../lib/classification";
 import { orderMovements } from "../lib/movement-order";
 import {
@@ -492,7 +493,7 @@ export function Dashboard({ onImport }: { onImport: () => void }) {
                           className="movement-link"
                           to={`/movimientos?id=${m.id}`}
                         >
-                          {m.merchant || m.description}
+                          {movementDescription(m)}
                         </Link>
                         <small>{displayDate(m.date)}</small>
                         <TagChips ids={m.tagIds} tags={data.tags} />

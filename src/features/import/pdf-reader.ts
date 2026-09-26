@@ -26,6 +26,7 @@ const headers = [
   "Contraparte",
   "Comisión",
   "Tipo de cambio aplicado",
+  "Referencia",
 ];
 const months = [
   "ene",
@@ -515,6 +516,7 @@ export function readPdfPage(
         text.merchant,
         costs.fee,
         costs.exchangeRate,
+        text.reference || "",
       ]);
     });
     const unpaired = items.filter(

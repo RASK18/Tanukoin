@@ -249,17 +249,22 @@ function uniqueAnchor(m: Movement, saved: Movement[]) {
   return matches.length === 1 ? matches[0] : undefined;
 }
 
-/** New candidates and saved rows share vertices only through unique exact matches. */
+/** Accepted import correspondences share vertices; legacy callers may use exact bank anchors. */
 export function reconcileMovementOrder(
   saved: Movement[],
   pending: Movement[],
   source: Movement[],
+  accepted?: Map<string, string>,
 ) {
   const newIds = new Set(pending.map((m) => m.id));
   const sourceById = new Map(source.map((m) => [m.id, m]));
   const mapping = new Map<string, string>();
   for (const m of source) {
-    const id = newIds.has(m.id) ? m.id : uniqueAnchor(m, saved)?.id;
+    const id = newIds.has(m.id)
+      ? m.id
+      : accepted
+        ? accepted.get(m.id)
+        : uniqueAnchor(m, saved)?.id;
     if (id) mapping.set(m.id, id);
   }
   const anchorCounts = new Map<string, number>();
@@ -267,7 +272,12 @@ export function reconcileMovementOrder(
     if (!newIds.has(id)) anchorCounts.set(id, (anchorCounts.get(id) || 0) + 1);
   for (const [id, anchor] of mapping)
     if ((anchorCounts.get(anchor) || 0) > 1) mapping.delete(id);
-  const affected = new Set(pending.map(orderGroup));
+  const affected = new Set(
+    [
+      ...pending,
+      ...saved.filter((m) => [...mapping.values()].includes(m.id)),
+    ].map(orderGroup),
+  );
   const all = [...saved.filter((m) => affected.has(orderGroup(m))), ...pending];
   const updates: Movement[] = [];
   let conflict = false;

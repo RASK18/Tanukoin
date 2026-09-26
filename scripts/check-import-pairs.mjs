@@ -58,6 +58,7 @@ const fields = [
   "balance",
   "balanceSource",
   "description",
+  "reference",
   "merchant",
   "notes",
   "originalAmount",
@@ -118,21 +119,45 @@ async function review(page, file) {
     exact: true,
   });
   if (await opening.count()) await opening.fill("0");
+  // Explicit test policy for conflicting fields: keep the saved value.
+  // Identity ambiguities are never silently resolved by this diagnostic.
+  let unresolved = 0;
+  const dialogReview = page.getByRole("dialog", {
+    name: "Importar movimientos",
+    exact: true,
+  });
+  while (true) {
+    for (const control of await dialogReview
+      .locator('select[aria-label^="Resolver "]')
+      .all())
+      await control.selectOption("saved");
+    const decisions = dialogReview.locator('select[aria-label^="Decisión "]');
+    for (const control of await decisions.all())
+      if (
+        (await control.locator('option[value=""]').innerText()) ===
+        "Elige una decisión"
+      )
+        unresolved++;
+    const nextPage = dialogReview.getByRole("button", {
+      name: "Siguiente",
+      exact: true,
+    });
+    if (await nextPage.isDisabled()) break;
+    await nextPage.click();
+  }
+  if (unresolved) throw new Error("Identidad pendiente de revisión");
   const numbers = await page
     .locator(".import-summary > span > strong")
     .allTextContents();
   return {
     selected: Number(numbers[0]),
     flagged: Number(numbers[1]),
-    excluded: Number(numbers[2]),
+    updates: Number(numbers[2]),
   };
 }
 
 async function save(page, selected) {
-  if (!selected) return;
-  await page
-    .getByRole("button", { name: /^Importar \d+ movimientos$/ })
-    .click();
+  await page.locator(".import-review-submit").click();
   await expect(
     page.getByRole("dialog", { name: "Importar movimientos", exact: true }),
   ).not.toBeVisible({ timeout: 60000 });
@@ -310,6 +335,20 @@ try {
         const after = await stored(page);
         if (after.length !== before.length + result.selected || external)
           throw new Error("Validación");
+        stage = "reimportación del primer archivo";
+        const repeated = await review(page, files[first]);
+        if (repeated.selected !== 0)
+          throw new Error("La reimportación añade filas");
+        await save(page, repeated.selected);
+        const final = await stored(page);
+        if (
+          final.length !== after.length ||
+          after.some((m) => {
+            const next = final.find((n) => n.id === m.id);
+            return !next || fields.some((f) => m[f] !== next[f]);
+          })
+        )
+          throw new Error("Reimportación no estable");
         const modified = before.filter((old) => {
           const current = after.find((m) => m.id === old.id);
           return (
@@ -326,6 +365,7 @@ try {
           final: after.length,
           existingEnrichedOrChanged: modified,
           externalRequests: external,
+          reimportedNew: repeated.selected,
         });
         console.log(JSON.stringify(runs.at(-1)));
       } catch {

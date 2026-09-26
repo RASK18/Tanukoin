@@ -296,6 +296,7 @@ export function normalizeBankTransactions(
           (r.credit_debit_indicator === "DBIT" ? -1 : 1),
         currency,
         description: text.description,
+        reference: text.reference,
         merchant: text.merchant,
         ...movementDateRange(dates),
         categorySource: "none",

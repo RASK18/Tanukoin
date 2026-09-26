@@ -1,3 +1,4 @@
+import { movementDescription } from "../lib/movement-text";
 import { AccountDialog } from "../components/AccountDialog";
 import { categoryTree } from "../lib/classification";
 import { useState } from "react";
@@ -508,7 +509,7 @@ export function Rules() {
           <ul className="review-list">
             {preview.slice(0, 50).map((m) => (
               <li key={m.id}>
-                {m.description}
+                {movementDescription(m)}
                 <ArrowRight size={13} />
                 {categoryTree(data.categories).path(m.categoryId) ||
                   "Sin categoría"}{" "}
@@ -781,7 +782,7 @@ export function Subscriptions() {
             return (
               <div className="list-row" key={m.id}>
                 <span>
-                  {m.merchant || m.description}
+                  {movementDescription(m)}
                   <small>
                     {group.length} cargos similares · posible recurrencia
                     mensual
@@ -792,7 +793,7 @@ export function Subscriptions() {
                   onClick={() => {
                     const r: Recurrence = {
                       id: id(),
-                      name: m.merchant || m.description,
+                      name: movementDescription(m),
                       accountId: m.accountId,
                       amount: m.amount,
                       currency: m.currency,
@@ -946,7 +947,7 @@ export function Subscriptions() {
                 .slice(0, 100)
                 .map((m) => (
                   <option key={m.id} value={m.id}>
-                    {m.date} · {m.description} · {money(m.amount, m.currency)}
+                    {m.date} · {movementDescription(m)} · {money(m.amount, m.currency)}
                   </option>
                 ))}
             </select>

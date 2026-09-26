@@ -1,5 +1,5 @@
 import type { Movement, Relation, Rule, Recurrence } from "../data/types";
-import { removeIbans } from "./movement-text";
+import { removeIbans, movementDescription } from "./movement-text";
 export const normalize = (value: string) =>
   value
     .normalize("NFD")
@@ -244,7 +244,7 @@ export function applyRules(movement: Movement, rules: Rule[]): Movement {
       (r) =>
         r.enabled &&
         (!r.descriptionContains ||
-          normalize(movement.description).includes(
+          normalize(movementDescription(movement)).includes(
             normalize(r.descriptionContains),
           )) &&
         (!r.merchantContains ||

@@ -33,14 +33,14 @@ it.each([
   expect(normalizeImportedText({ description }).merchant).toBe(merchant);
 });
 
-it("prioriza la contraparte explícita y concatena la referencia sin incorporarla al nombre", () => {
+it("prioriza la contraparte explícita y separa la referencia sin incorporarla al nombre", () => {
   const result = normalizeImportedText({
     description: "Pago de Ana Prueba",
     merchant: "Ana Ejemplo",
     reference: "Excursión ficticia",
   });
   expect(result).toEqual({
-    description: "Pago de Ana Prueba. Excursión ficticia",
+    description: "Pago de Ana Prueba", reference: "Excursión ficticia",
     merchant: "Ana Ejemplo",
     notes: "",
   });
@@ -49,14 +49,13 @@ it("prioriza la contraparte explícita y concatena la referencia sin incorporarl
   ).toEqual(result);
 });
 
-it("mueve referencias etiquetadas y multilínea al concepto sin confundir los detalles siguientes", () => {
+it("mueve referencias etiquetadas y multilínea a su campo sin confundir los detalles siguientes", () => {
   const result = normalizeImportedText({
     description: "Transferencia a Ana Prueba",
     notes: `Referencia: Excursión ficticia\nreserva de septiembre\nA Ana Prueba, ${printIban}\nTarjeta: 1234\nComisión: 0,50 EUR`,
   });
   expect(result).toEqual({
-    description:
-      "Transferencia a Ana Prueba. Excursión ficticia reserva de septiembre",
+    description: "Transferencia a Ana Prueba", reference: "Excursión ficticia reserva de septiembre",
     merchant: "Ana Prueba",
     notes: "A Ana Prueba\nTarjeta: 1234\nComisión: 0,50 EUR",
   });
@@ -66,7 +65,7 @@ it("mueve referencias etiquetadas y multilínea al concepto sin confundir los de
       description: "Transferencia a Ana Prueba. Referencia: Excursión ficticia",
     }),
   ).toMatchObject({
-    description: "Transferencia a Ana Prueba. Excursión ficticia",
+    description: "Transferencia a Ana Prueba", reference: "Excursión ficticia",
     merchant: "Ana Prueba",
   });
 });
@@ -112,7 +111,7 @@ it.each([
       notes: `IBAN: ${value}`,
     }),
   ).toEqual({
-    description: "Pago de Ana Prueba. Factura 01",
+    description: "Pago de Ana Prueba", reference: "Factura 01",
     merchant: "Ana Prueba",
     notes: "",
   });
@@ -125,7 +124,7 @@ it("preserva referencias, nombres y números de tarjeta que no son IBAN", () => 
   expect(containsIban(text)).toBe(false);
 });
 
-it("una referencia en columna se guarda en el concepto y los IBAN no afectan a duplicados", () => {
+it("una referencia en columna se guarda por separado y los IBAN no afectan a duplicados", () => {
   const file = (name: string, ref: string, code: string) =>
     readTabular(
       new TextEncoder().encode(
@@ -142,7 +141,7 @@ it("una referencia en columna se guarda en el concepto y los IBAN no afectan a d
   const m = first.candidates[0].movement;
   expect(m).toMatchObject({
     merchant: "Ana Prueba",
-    description: "Pago de Ana Prueba. Factura 01",
+    description: "Pago de Ana Prueba", reference: "Factura 01",
     notes: "",
   });
   expect(JSON.stringify(m)).not.toContain("ES00");
@@ -165,7 +164,7 @@ it("una referencia en columna se guarda en el concepto y los IBAN no afectan a d
     [m],
   );
   expect(different.candidates[0]).toMatchObject({
-    duplicate: "none",
-    selected: true,
+    duplicate: "possible",
+    selected: false,
   });
 });

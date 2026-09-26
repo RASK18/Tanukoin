@@ -45,6 +45,7 @@ export type ReviewField =
   | "secondaryDate"
   | "time"
   | "secondaryTime"
+  | "reference"
   | "description"
   | "merchant"
   | "notes"
@@ -69,6 +70,8 @@ export interface ParsedFile {
   kind?: "pdf" | "table";
 }
 export interface Candidate {
+  decision?: "new" | "omit" | { targetId: string };
+  resolutions?: Record<string, "saved" | "incoming">;
   reviewOriginalNotes?: string;
   issues?: ImportIssue[];
   edits?: Partial<Record<ReviewField, string>>;

@@ -1,3 +1,6 @@
+import type { ReconciledCandidate } from "./reconcile";
+import type { Movement } from "../../data/types";
+import { movementDescription } from "../../lib/movement-text";
 import { Field } from "../../components/ui";
 import type { Candidate, ReviewField } from "./types";
 import { fieldValue, reviewIssues } from "./review";
@@ -8,6 +11,7 @@ const labels: Record<ReviewField, string> = {
   time: "Hora principal",
   secondaryTime: "Hora secundaria",
   description: "Concepto",
+  reference: "Referencia",
   merchant: "Contraparte",
   notes: "Notas",
   amount: "Importe",
@@ -21,13 +25,19 @@ export function ReviewTable({
   candidates,
   onEdit,
   onSelect,
+  onDecision,
+  onResolve,
+  saved,
   opening,
   onOpening,
   calculate,
   balanceError,
   errors,
 }: {
-  candidates: Candidate[];
+  candidates: ReconciledCandidate[];
+  saved: Movement[];
+  onDecision: (id: string, decision: Candidate["decision"]) => void;
+  onResolve: (id: string, key: string, value: "saved" | "incoming") => void;
   onEdit: (id: string, key: ReviewField, value: string) => void;
   onSelect: (id: string, selected: boolean) => void;
   opening: string;
@@ -84,9 +94,13 @@ export function ReviewTable({
                   [...(c.issues || []), ...issues].some((issue) =>
                     issue.fields.includes(key),
                   ) && !(key === "balance" && calculate);
-                const highlighted = issues.some((issue) =>
-                  issue.fields.includes(key),
-                );
+                const highlighted =
+                  c.changes.some(
+                    (change) =>
+                      change.conflict &&
+                      !change.choice &&
+                      change.fields.some((field) => field === key),
+                  ) || issues.some((issue) => issue.fields.includes(key));
                 const value = c.edits?.[key] ?? fieldValue(m, key);
                 const label = `${key === "date" ? "Fecha" : labels[key]} fila ${c.row}${c.page ? ` de la página ${c.page}` : ""}`;
                 return (
@@ -138,7 +152,9 @@ export function ReviewTable({
                 <tr
                   key={m.id}
                   className={
-                    issues.length || errors[m.id] ? "review-row-warning" : ""
+                    issues.length || errors[m.id] || c.blocking
+                      ? "review-row-warning"
+                      : ""
                   }
                 >
                   <td
@@ -151,7 +167,12 @@ export function ReviewTable({
                     <input
                       aria-label={`Incluir fila ${c.row}${c.page ? ` de la página ${c.page}` : ""}`}
                       type="checkbox"
-                      checked={c.selected}
+                      checked={
+                        c.selected &&
+                        c.status !== "known" &&
+                        c.status !== "omit"
+                      }
+                      disabled={c.status === "known"}
                       onChange={(e) => onSelect(m.id, e.target.checked)}
                     />
                     <small>
@@ -166,6 +187,7 @@ export function ReviewTable({
                   </td>
                   <td data-label="Concepto y detalles">
                     {field("description")}
+                    {field("reference")}
                     {field("merchant")}
                     {field("notes")}
                   </td>
@@ -188,13 +210,104 @@ export function ReviewTable({
                     </small>
                   </td>
                   <td data-label="Estado">
-                    <span>
-                      {c.duplicate === "possible"
-                        ? c.balanceMissing
-                          ? "Revisar coincidencia: falta saldo bancario comparable"
-                          : "Posible duplicado"
-                        : "Nuevo"}
-                    </span>
+                    <strong>
+                      {
+                        {
+                          new: "Nuevo",
+                          known: "Ya importado",
+                          update: "Completar datos",
+                          review: "Revisar coincidencia",
+                          omit: "Omitido",
+                        }[c.status]
+                      }
+                    </strong>
+                    {c.match.reason && (
+                      <small>
+                        {c.match.reason === "balance"
+                          ? "Coincidencia única con saldo bancario"
+                          : "Coincidencia por secuencia"}
+                      </small>
+                    )}
+                    {c.match.candidates.length > 0 && (
+                      <label className="review-field">
+                        <span>Correspondencia</span>
+                        <select
+                          aria-label={`Decisión fila ${c.row}${c.page ? ` de la página ${c.page}` : ""}`}
+                          value={
+                            typeof c.decision === "object"
+                              ? c.decision.targetId
+                              : c.decision || ""
+                          }
+                          onChange={(e) =>
+                            onDecision(
+                              m.id,
+                              e.target.value === "new" ||
+                                e.target.value === "omit"
+                                ? e.target.value
+                                : e.target.value
+                                  ? { targetId: e.target.value }
+                                  : undefined,
+                            )
+                          }
+                        >
+                          <option value="">
+                            {c.match.targetId
+                              ? "Correspondencia detectada"
+                              : "Elige una decisión"}
+                          </option>
+                          <option value="new">Es una operación nueva</option>
+                          {c.match.candidates.map((id) => {
+                            const old = saved.find((s) => s.id === id)!;
+                            return (
+                              <option key={id} value={id}>
+                                Corresponde a: {old.date} ·{" "}
+                                {movementDescription(old)}
+                              </option>
+                            );
+                          })}
+                          <option value="omit">Omitir</option>
+                        </select>
+                      </label>
+                    )}
+                    {c.changes.map((change) => (
+                      <div
+                        key={change.key}
+                        className={
+                          change.conflict && !change.choice
+                            ? "review-field-warning"
+                            : "review-change"
+                        }
+                      >
+                        <strong>{change.label}</strong>
+                        <small>Guardado: {change.before}</small>
+                        <small>Propuesta: {change.after}</small>
+                        {change.conflict && (
+                          <select
+                            aria-label={`Resolver ${change.label} fila ${c.row}${c.page ? ` de la página ${c.page}` : ""}`}
+                            value={change.choice || ""}
+                            onChange={(e) => {
+                              if (e.target.value)
+                                onResolve(
+                                  m.id,
+                                  change.key,
+                                  e.target.value as "saved" | "incoming",
+                                );
+                            }}
+                          >
+                            <option value="">Elige qué conservar</option>
+                            <option value="saved">Conservar guardado</option>
+                            <option value="incoming">Utilizar entrante</option>
+                          </select>
+                        )}
+                      </div>
+                    ))}
+                    {c.blocking && (
+                      <p role="status">
+                        Resuelve la coincidencia y sus campos antes de guardar.
+                        Cada operación guardada solo puede corresponder a una
+                        fila.
+                      </p>
+                    )}
                     <ul id={issueId}>
                       {issues.map((issue, i) => (
                         <li key={i}>{issue.message}</li>

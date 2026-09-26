@@ -200,6 +200,7 @@ export function buildCandidates(
             : undefined,
         currency: account.currency,
         description: text.description,
+        reference: text.reference,
         merchant: text.merchant,
         ...dates,
         categorySource: "none",

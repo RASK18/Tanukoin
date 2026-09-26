@@ -1,3 +1,4 @@
+import { movementDescription } from "../../lib/movement-text";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Send, X, Minus, ShieldCheck, Sparkles, Trash2 } from "lucide-react";
@@ -203,7 +204,7 @@ export function Tanu() {
                             }
                             onClick={() => setOpen(false)}
                           >
-                            {r.date} · {r.merchant || r.description}
+                            {r.date} · {movementDescription(r)}
                             <strong>{money(r.amount, r.currency)}</strong>
                           </Link>
                         ))}

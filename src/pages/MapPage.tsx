@@ -1,3 +1,4 @@
+import { movementDescription } from "../lib/movement-text";
 import { useEffect, useRef, useState } from "react";
 import { orderMovements } from "../lib/movement-order";
 import { Link, useSearchParams } from "react-router-dom";
@@ -101,7 +102,7 @@ export function MapPage() {
         m = data.movements.find((m) => m.id === a.movementId);
       if (!l || !m) continue;
       const text = document.createElement("div");
-      text.textContent = `${m.merchant || m.description} · ${money(m.amount, m.currency)} · ${a.status === "confirmed" ? "Confirmado" : "Sugerido"}`;
+      text.textContent = `${movementDescription(m)} · ${money(m.amount, m.currency)} · ${a.status === "confirmed" ? "Confirmado" : "Sugerido"}`;
       L.circleMarker([l.lat, l.lng], {
         radius: 8,
         color: a.status === "confirmed" ? "#285c49" : "#b9794d",
@@ -327,7 +328,7 @@ export function MapPage() {
               <option value="">Todos los cargos con ubicación</option>
               {orderMovements(data.movements, true).map((m) => (
                 <option key={m.id} value={m.id}>
-                  {m.date} · {m.merchant || m.description} ·{" "}
+                  {m.date} · {movementDescription(m)} ·{" "}
                   {money(m.amount, m.currency)}
                 </option>
               ))}

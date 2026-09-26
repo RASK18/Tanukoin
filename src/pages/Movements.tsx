@@ -1,3 +1,4 @@
+import { movementDescription } from "../lib/movement-text";
 import {
   assignCategory,
   changeTags,
@@ -180,6 +181,7 @@ export function Movements({ onImport }: { onImport: () => void }) {
         "Comisión",
         "Tipo de cambio aplicado",
         "Origen del saldo",
+        "Referencia",
       ],
       ...rows.map((m) => [
         m.date,
@@ -217,6 +219,7 @@ export function Movements({ onImport }: { onImport: () => void }) {
               .replace(".", ","),
         m.exchangeRate || "",
         m.balanceSource === "calculated" ? "Calculado" : "",
+        m.reference || "",
       ]),
     ]
       .map((row) => row.map(csvCell).join(";"))
@@ -480,7 +483,7 @@ export function Movements({ onImport }: { onImport: () => void }) {
                     <tr key={m.id}>
                       <td>
                         <input
-                          aria-label={`Seleccionar ${m.description}`}
+                          aria-label={`Seleccionar ${movementDescription(m)}`}
                           type="checkbox"
                           checked={selected.includes(m.id)}
                           onChange={(e) =>
@@ -498,9 +501,9 @@ export function Movements({ onImport }: { onImport: () => void }) {
                       </td>
                       <td>
                         <strong className="row-title">
-                          {m.merchant || m.description}
+                          {movementDescription(m)}
                         </strong>
-                        {m.merchant && <small>{m.description}</small>}
+                        {m.merchant && <small>{m.merchant}</small>}
                         {m.notes && (
                           <small className="note-text">{m.notes}</small>
                         )}
@@ -569,7 +572,7 @@ export function Movements({ onImport }: { onImport: () => void }) {
                       <td>
                         <button
                           className="icon-button"
-                          aria-label={`Editar ${m.description}`}
+                          aria-label={`Editar ${movementDescription(m)}`}
                           onClick={() => setEditing({ ...m })}
                         >
                           <Pencil size={16} />
@@ -798,6 +801,9 @@ function MovementEditor({
               value={m.description}
               onChange={(e) => setM({ ...m, description: e.target.value })}
             />
+          </Field>
+          <Field label="Referencia">
+            <input value={m.reference || ""} onChange={(e) => setM({ ...m, reference: e.target.value || undefined })} />
           </Field>
           <Field label="Contraparte">
             <input

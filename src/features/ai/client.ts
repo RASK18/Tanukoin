@@ -1,3 +1,4 @@
+import { movementDescription } from "../../lib/movement-text";
 import { categoryTree } from "../../lib/classification";
 import { db } from "../../data/db";
 import type { Category, Movement } from "../../data/types";
@@ -159,7 +160,7 @@ export async function categorize(
   const exampleVectors = await vectors(
     confirmed.map((m) => ({
       id: m.id,
-      text: `${m.merchant} ${m.description}`,
+      text: `${m.merchant} ${movementDescription(m)}`,
     })),
   );
   const uncategorized = movements.filter(
@@ -168,7 +169,7 @@ export async function categorize(
   const movementVectors = await vectors(
     uncategorized.map((m) => ({
       id: m.id,
-      text: `${m.merchant} ${m.description}`,
+      text: `${m.merchant} ${movementDescription(m)}`,
     })),
     onProgress,
   );
@@ -201,7 +202,7 @@ export async function semanticSearch(query: string, movements: Movement[]) {
   const mv = await vectors(
     movements.map((m) => ({
       id: m.id,
-      text: `${m.merchant} ${m.description}`,
+      text: `${m.merchant} ${movementDescription(m)}`,
     })),
   );
   return movements

@@ -30,7 +30,7 @@ export function reviewIssues(candidate: Candidate): ImportIssue[] {
       message:
         "Las fechas o los saldos no confirman la secuencia del extracto. Revisa los datos; corregirlos no cambia su posición.",
     });
-  if (candidate.duplicate === "possible")
+  if (candidate.duplicate === "possible" && !("match" in candidate))
     issues.push({
       row: candidate.row,
       fields: [],
@@ -101,6 +101,7 @@ export function editReviewedMovement(
   validateMovementCosts(m);
   validateOriginalAmount(m);
   Object.assign(m, sanitizeMovementText(m));
+  m.manualFields = [...new Set([...(m.manualFields || []), ...Object.keys(edits)])];
   m.fingerprint = fingerprint(m);
   return m;
 }
